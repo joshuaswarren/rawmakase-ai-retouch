@@ -42,6 +42,11 @@ pub(crate) const DEFAULT_MODEL: &str = "bria/eraser";
 /// How long `Prefer: wait` holds the create call: Replicate's maximum.
 const WAIT: u32 = 60;
 
+/// The shortest `Cancel-After` Replicate takes
+/// (<https://replicate.com/docs/reference/http>): with less of the deadline
+/// left, no prediction is started.
+const LEAST_CANCEL_AFTER: Duration = Duration::from_secs(5);
+
 /// Replicate, with a token and a model.
 pub(crate) struct Replicate {
     base: String,
@@ -166,9 +171,14 @@ impl Replicate {
         uploaded.push(id);
         let (id, mask) = self.upload(until, "mask", mask_png)?;
         uploaded.push(id);
-        // Checked again before the paid call: it never starts once cancelled
-        // or past the deadline.
+        // Checked again before the paid call: it never starts once cancelled,
+        // past the deadline, or with too little of it left to bound it.
         let agent = until.agent()?;
+        if until.left() < LEAST_CANCEL_AFTER {
+            return Err(ProviderError::Unavailable(
+                "the request timed out before the prediction could start".into(),
+            ));
+        }
         let input = json!({ "image": image, "mask": mask });
         let (url, body) = match &self.version {
             Some(version) => (
@@ -186,10 +196,7 @@ impl Replicate {
                 .header("Authorization", self.authorization())
                 .header("Prefer", format!("wait={WAIT}"))
                 // What is left of the request's own deadline, not a fresh one.
-                .header(
-                    "Cancel-After",
-                    format!("{}s", until.left().as_secs().max(1)),
-                )
+                .header("Cancel-After", format!("{}s", until.left().as_secs()))
                 .content_type("application/json")
                 .send(body.to_string().as_bytes()),
         )?;

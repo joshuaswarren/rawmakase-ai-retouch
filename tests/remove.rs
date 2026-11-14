@@ -452,7 +452,7 @@ fn replicate_uploads_waits_and_polls_past_prefer_wait() {
         .and_then(|v| v.strip_suffix('s'))
         .and_then(|v| v.parse().ok())
         .unwrap();
-    assert!((1..=8).contains(&left), "{left}");
+    assert!((5..=8).contains(&left), "{left}");
     assert_eq!(create.header("authorization"), Some(&*bearer));
     let input = &create.json()["input"];
     assert_eq!(
@@ -617,7 +617,8 @@ fn cancelling_while_replicate_runs_answers_at_once_and_cancels_the_prediction() 
 fn a_prediction_past_the_deadline_is_cancelled_and_unavailable() {
     let server = replicate_server(|_, _, _| json!({"id": "p1", "status": "processing"}));
     let mut config = support::config(&server, &[]);
-    config.deadline = Duration::from_millis(300);
+    // Just over the least Cancel-After, so the prediction starts, then runs out.
+    config.deadline = Duration::from_millis(5300);
     let host = support::start(
         config,
         &[("provider", REPLICATE), ("replicate-token", TOKEN)],
@@ -821,6 +822,34 @@ fn a_failed_poll_cancels_the_prediction() {
             .requests()
             .iter()
             .any(|r| r.path == "/v1/predictions/p1/cancel")
+    );
+    host.finish().unwrap();
+}
+
+/// With less than Replicate's least `Cancel-After` (5 s) left once uploaded,
+/// no prediction is started: it couldn't be bounded.
+#[test]
+fn too_little_time_left_for_a_bounded_prediction_starts_none() {
+    let server = slow_replicate(Duration::from_millis(600), 200);
+    let mut config = support::config(&server, &[]);
+    config.deadline = Duration::from_secs(6);
+    let host = support::start(
+        config,
+        &[("provider", REPLICATE), ("replicate-token", TOKEN)],
+    );
+    let error = host
+        .generate_retouch(support::request(), &support::image(), &support::coverage())
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::Unavailable);
+    assert!(error.message.contains("timed out"), "{error}");
+    assert_eq!(creates(&server), 0);
+    assert_eq!(
+        server
+            .requests()
+            .iter()
+            .filter(|r| r.method == "DELETE")
+            .count(),
+        2
     );
     host.finish().unwrap();
 }
