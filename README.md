@@ -72,13 +72,17 @@ shell profile (`.zshrc`, `.bashrc`), so the setting is the reliable place.
 
 Install it from RAWmakase: **Preferences > Extensions > Available**, or
 **Install from GitHub…** with `https://github.com/pch/rawmakase-ai-remove`. It
-needs RAWmakase 0.5 or later.
+needs a RAWmakase with AI Remove ([pch/rawmakase#1093](https://github.com/pch/rawmakase/pull/1093)),
+which isn't in a release yet: RAWmakase 0.5.0 reads manifests up to `api = 2`
+and refuses this one as written for a newer RAWmakase.
 
 ## Building and releasing
 
 ```sh
 cargo test                         # no network, no key needed
-cargo install --locked --git https://github.com/pch/rawmakase cargo-rawmakase
+# The RAWmakase commit the SDK is pinned to: it reads `api = 3`.
+cargo install --locked --git https://github.com/pch/rawmakase \
+    --rev 2f03585df062bf6f3f0ea377af0034f2161ab44e cargo-rawmakase
 cargo rawmakase dev                # try it in RAWmakase's developer mode
 cargo rawmakase build && cargo rawmakase package
 ```

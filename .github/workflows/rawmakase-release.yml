@@ -43,10 +43,30 @@ jobs:
             if [ -f "$program" ] && [ -x "$program" ]; then codesign --force --sign - "$program"; fi
           done
       - run: cargo rawmakase package --target ${{ matrix.target }}
-      - name: Attach to the release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rmext-${{ matrix.target }}
+          path: target/rmext/*.rmext
+          if-no-files-found: error
+
+  # One job publishes, once every package is built: the release never exists
+  # with only some of them, and no two jobs race to create it.
+  release:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rmext-*
+          path: rmext
+          merge-multiple: true
+      - name: Publish the release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes ""
-          gh release upload "$GITHUB_REF_NAME" target/rmext/*.rmext --clobber
+          ls rmext
+          test "$(ls rmext/*.rmext | wc -l)" -eq 6
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file /dev/null --verify-tag
+          gh release upload "$GITHUB_REF_NAME" rmext/*.rmext --clobber

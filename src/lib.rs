@@ -117,7 +117,21 @@ impl RetouchGenerator for Remove {
         cx: &Context,
         ask: RetouchAsk<'_>,
     ) -> Result<RetouchGenerated, RemoteError> {
-        let chosen = self.provider(cx.settings())?;
+        // Whatever a setting holds, a key pasted in the wrong field included,
+        // is cleaned out of what choosing the provider says.
+        let chosen = self.provider(cx.settings()).map_err(|mut e| {
+            let secrets: Vec<&str> = [
+                setting::FAL_KEY,
+                setting::REPLICATE_TOKEN,
+                setting::REPLICATE_MODEL,
+            ]
+            .iter()
+            .map(|id| text(cx.settings(), id))
+            .filter(|v| !v.is_empty())
+            .collect();
+            e.message = sanitize(&e.message, &secrets);
+            e
+        })?;
         let (name, secret) = (chosen.provider.name(), chosen.secret.clone());
         let fail = |e: ProviderError| to_remote(e, name, &secret);
         let request = &ask.request;

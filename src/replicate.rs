@@ -78,10 +78,12 @@ impl Replicate {
             && version
                 .is_none_or(|v| v.chars().all(|c| c.is_ascii_alphanumeric()) && !v.is_empty())
             && model.len() <= 100;
+        // Never the value itself: a token pasted here by mistake must not
+        // reach a message.
         if !shaped {
-            return Err(format!(
-                "the Replicate model setting {model:?} isn't owner/name or owner/name:version"
-            ));
+            return Err(
+                "the Replicate model setting isn't owner/name or owner/name:version".into(),
+            );
         }
         Ok(Self {
             base: base.trim_end_matches('/').to_string(),
@@ -100,10 +102,11 @@ impl Replicate {
     /// Uploads a PNG with the files API and returns its id and URL.
     fn upload(
         &self,
-        agent: &Agent,
+        until: Until<'_>,
         name: &str,
         png: &[u8],
     ) -> Result<(String, String), ProviderError> {
+        let agent = until.agent()?;
         let boundary = boundary(png);
         let mut body = format!(
             "--{boundary}\r\nContent-Disposition: form-data; name=\"content\"; \
@@ -154,20 +157,18 @@ impl Replicate {
 
     fn predict(
         &self,
-        agent: &Agent,
+        until: Until<'_>,
         uploaded: &mut Vec<String>,
         image_png: &[u8],
         mask_png: &[u8],
-        cancel: &dyn Fn() -> bool,
-        started: Instant,
     ) -> Result<Vec<u8>, ProviderError> {
-        let (id, image) = self.upload(agent, "image", image_png)?;
+        let (id, image) = self.upload(until, "image", image_png)?;
         uploaded.push(id);
-        let (id, mask) = self.upload(agent, "mask", mask_png)?;
+        let (id, mask) = self.upload(until, "mask", mask_png)?;
         uploaded.push(id);
-        if cancel() {
-            return Err(ProviderError::Cancelled);
-        }
+        // Checked again before the paid call: it never starts once cancelled
+        // or past the deadline.
+        let agent = until.agent()?;
         let input = json!({ "image": image, "mask": mask });
         let (url, body) = match &self.version {
             Some(version) => (
@@ -184,9 +185,10 @@ impl Replicate {
                 .post(url)
                 .header("Authorization", self.authorization())
                 .header("Prefer", format!("wait={WAIT}"))
+                // What is left of the request's own deadline, not a fresh one.
                 .header(
                     "Cancel-After",
-                    format!("{}s", self.deadline.as_secs().max(5)),
+                    format!("{}s", until.left().as_secs().max(1)),
                 )
                 .content_type("application/json")
                 .send(body.to_string().as_bytes()),
@@ -200,45 +202,20 @@ impl Replicate {
         if !(200..=299).contains(&reply.status) {
             return Err(error(&reply, "starting the prediction"));
         }
-        let mut prediction = reply.json();
+        let prediction = reply.json();
         let id = prediction["id"]
             .as_str()
             .filter(|id| id.chars().all(|c| c.is_ascii_alphanumeric()) && !id.is_empty())
             .ok_or_else(|| ProviderError::Invalid("Replicate's answer has no prediction".into()))?
             .to_string();
-        loop {
-            match prediction["status"].as_str().unwrap_or("") {
-                "succeeded" => break,
-                "failed" => return Err(failed(&prediction)),
-                "canceled" => {
-                    return Err(ProviderError::Unavailable(
-                        "the prediction was cancelled on Replicate".into(),
-                    ));
-                }
-                _ => {}
-            }
-            if !self.wait(cancel, started) {
-                self.cancel(&id);
-                return Err(if cancel() {
-                    ProviderError::Cancelled
-                } else {
-                    ProviderError::Unavailable("the prediction timed out".into())
-                });
-            }
-            let reply = http::read(
-                agent
-                    .get(format!("{}/v1/predictions/{id}", self.base))
-                    .header("Authorization", self.authorization())
-                    .call(),
-            )?;
-            if !(200..=299).contains(&reply.status) {
-                return Err(error(&reply, "reading the prediction"));
-            }
-            prediction = reply.json();
+        // From here every way out but success, or the prediction's own end,
+        // stops it on Replicate: a paid prediction is never left running.
+        let result = self.follow(until, &id, prediction);
+        if let Err(Ended::Abandoned(_)) = &result {
+            self.cancel(&id);
         }
-        if cancel() {
-            return Err(ProviderError::Cancelled);
-        }
+        let prediction = result.map_err(Ended::into_error)?;
+        let agent = until.agent()?;
         let output = match &prediction["output"] {
             Value::String(url) => Some(url.as_str()),
             Value::Array(items) => items.iter().find_map(Value::as_str),
@@ -249,23 +226,93 @@ impl Replicate {
         // and nothing else gets it.
         let authorization = self.authorization();
         let on_api = output.starts_with(&format!("{}/", self.base));
-        http::fetch_image(agent, output, on_api.then_some(authorization.as_str()))
+        http::fetch_image(&agent, output, on_api.then_some(authorization.as_str()))
     }
 
-    /// Sleeps one polling interval, watching `cancel`; false when cancelled
-    /// or past the deadline.
-    fn wait(&self, cancel: &dyn Fn() -> bool, started: Instant) -> bool {
-        let until = Instant::now() + self.poll_every;
+    /// Polls prediction `id` from `prediction` until it ends.
+    fn follow(&self, until: Until<'_>, id: &str, mut prediction: Value) -> Result<Value, Ended> {
         loop {
-            if cancel() || started.elapsed() >= self.deadline {
-                return false;
+            match prediction["status"].as_str().unwrap_or("") {
+                "succeeded" => return Ok(prediction),
+                "failed" => return Err(Ended::Over(failed(&prediction))),
+                "canceled" => {
+                    return Err(Ended::Over(ProviderError::Unavailable(
+                        "the prediction was cancelled on Replicate".into(),
+                    )));
+                }
+                _ => {}
             }
-            let now = Instant::now();
-            if now >= until {
-                return true;
+            self.wait(until).map_err(Ended::Abandoned)?;
+            let agent = until.agent().map_err(Ended::Abandoned)?;
+            let reply = http::read(
+                agent
+                    .get(format!("{}/v1/predictions/{id}", self.base))
+                    .header("Authorization", self.authorization())
+                    .call(),
+            )
+            .map_err(Ended::Abandoned)?;
+            if !(200..=299).contains(&reply.status) {
+                return Err(Ended::Abandoned(error(&reply, "reading the prediction")));
             }
-            std::thread::sleep((until - now).min(Duration::from_millis(20)));
+            prediction = reply.json();
         }
+    }
+
+    /// Sleeps one polling interval, watching the cancel and the deadline.
+    fn wait(&self, until: Until<'_>) -> Result<(), ProviderError> {
+        let next = Instant::now() + self.poll_every;
+        loop {
+            until.check()?;
+            let now = Instant::now();
+            if now >= next {
+                return Ok(());
+            }
+            std::thread::sleep((next - now).min(Duration::from_millis(20)));
+        }
+    }
+}
+
+/// How following a prediction ended, when not in success.
+enum Ended {
+    /// It ended by itself on Replicate (failed, cancelled there).
+    Over(ProviderError),
+    /// This program stopped following it (cancelled, past the deadline, a
+    /// poll that failed): it may still be running there.
+    Abandoned(ProviderError),
+}
+impl Ended {
+    fn into_error(self) -> ProviderError {
+        match self {
+            Self::Over(e) | Self::Abandoned(e) => e,
+        }
+    }
+}
+
+/// One request's cancel and its absolute deadline, shared by every step, so
+/// no step starts once either has passed and none outlives the deadline.
+#[derive(Clone, Copy)]
+struct Until<'a> {
+    cancel: &'a dyn Fn() -> bool,
+    at: Instant,
+}
+impl Until<'_> {
+    fn left(&self) -> Duration {
+        self.at.saturating_duration_since(Instant::now())
+    }
+    /// Fails when cancelled or past the deadline.
+    fn check(&self) -> Result<(), ProviderError> {
+        if (self.cancel)() {
+            return Err(ProviderError::Cancelled);
+        }
+        if self.left().is_zero() {
+            return Err(ProviderError::Unavailable("the request timed out".into()));
+        }
+        Ok(())
+    }
+    /// An agent for the next call, bounded by what is left of the deadline.
+    fn agent(&self) -> Result<Agent, ProviderError> {
+        self.check()?;
+        Ok(http::agent(self.left()))
     }
 }
 
@@ -292,13 +339,12 @@ impl Provider for Replicate {
         mask_png: &[u8],
         cancel: &dyn Fn() -> bool,
     ) -> Result<Vec<u8>, ProviderError> {
-        if cancel() {
-            return Err(ProviderError::Cancelled);
-        }
-        let started = Instant::now();
-        let agent = http::agent(self.deadline);
+        let until = Until {
+            cancel,
+            at: Instant::now() + self.deadline,
+        };
         let mut uploaded = Vec::new();
-        let result = self.predict(&agent, &mut uploaded, image_png, mask_png, cancel, started);
+        let result = self.predict(until, &mut uploaded, image_png, mask_png);
         self.delete(&uploaded);
         result
     }

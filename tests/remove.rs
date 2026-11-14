@@ -446,7 +446,13 @@ fn replicate_uploads_waits_and_polls_past_prefer_wait() {
         .find(|r| r.path == "/v1/models/bria/eraser/predictions")
         .expect("a prediction of the official model");
     assert_eq!(create.header("prefer"), Some("wait=60"));
-    assert_eq!(create.header("cancel-after"), Some("8s"));
+    // What is left of the 8 s deadline after the uploads, not a fresh one.
+    let left: u64 = create
+        .header("cancel-after")
+        .and_then(|v| v.strip_suffix('s'))
+        .and_then(|v| v.parse().ok())
+        .unwrap();
+    assert!((1..=8).contains(&left), "{left}");
     assert_eq!(create.header("authorization"), Some(&*bearer));
     let input = &create.json()["input"];
     assert_eq!(
@@ -700,4 +706,121 @@ fn the_manifest_declares_what_the_program_implements() {
         (SettingControl::Text, json!(DEFAULT_REPLICATE_MODEL))
     );
     assert_eq!(manifest.settings.len(), 4);
+}
+
+/// Replicate's files and predictions, each upload answered after `upload`,
+/// every poll with `poll`'s status.
+fn slow_replicate(upload: Duration, poll: u16) -> Server {
+    let files = AtomicUsize::new(0);
+    Server::start(move |r| match (r.method.as_str(), r.path.as_str()) {
+        ("POST", "/v1/files") => {
+            let n = files.fetch_add(1, Ordering::SeqCst);
+            Reply::json(
+                201,
+                json!({"id": format!("file{n}"), "urls": {"get": format!("https://api.replicate.com/v1/files/file{n}")}}),
+            )
+            .after(upload)
+        }
+        ("DELETE", _) => Reply::json(204, json!({})),
+        ("POST", p) if p.ends_with("/cancel") => {
+            Reply::json(200, json!({"id": "p1", "status": "canceled"}))
+        }
+        ("POST", _) => Reply::json(201, json!({"id": "p1", "status": "starting"})),
+        ("GET", "/v1/predictions/p1") => Reply::json(
+            poll,
+            json!({"id": "p1", "status": "processing", "detail": "down"}),
+        ),
+        _ => Reply::json(404, json!({"detail": "not found"})),
+    })
+}
+
+fn creates(server: &Server) -> usize {
+    server
+        .requests()
+        .iter()
+        .filter(|r| {
+            r.method == "POST" && r.path.contains("/predictions") && !r.path.ends_with("/cancel")
+        })
+        .count()
+}
+
+/// A token pasted into the model setting by mistake never reaches the error.
+#[test]
+fn a_token_in_the_model_setting_never_reaches_the_error() {
+    let server = Server::start(|_| Reply::json(500, json!({})));
+    let host = replicate_host(
+        &server,
+        &[("replicate-model", SENTINEL), ("replicate-token", SENTINEL)],
+    );
+    let error = host
+        .generate_retouch(support::request(), &support::image(), &support::coverage())
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidRequest);
+    assert!(!error.message.contains("SENTINEL"), "{error}");
+    assert!(server.requests().is_empty());
+    host.finish().unwrap();
+}
+
+/// Cancelled during the first upload: nothing more is uploaded, and no
+/// prediction is ever started.
+#[test]
+fn a_cancel_during_an_upload_starts_nothing_more() {
+    let server = slow_replicate(Duration::from_millis(300), 200);
+    let host = replicate_host(&server, &[]);
+    let id = host
+        .send_retouch(support::request(), &support::image(), &support::coverage())
+        .unwrap();
+    while server.next_arrival(Duration::from_secs(5)).path != "/v1/files" {}
+    host.cancel(id);
+    assert_eq!(
+        host.wait_retouch(id).unwrap_err().code,
+        ErrorCode::Cancelled
+    );
+    std::thread::sleep(Duration::from_millis(800));
+    let uploads = server
+        .requests()
+        .iter()
+        .filter(|r| r.path == "/v1/files")
+        .count();
+    assert_eq!(uploads, 1);
+    assert_eq!(creates(&server), 0);
+    host.finish().unwrap();
+}
+
+/// The deadline is one for the whole request: uploads that use it up leave
+/// no time to start a paid prediction, and none is started.
+#[test]
+fn uploads_that_use_up_the_deadline_start_no_prediction() {
+    let server = slow_replicate(Duration::from_millis(200), 200);
+    let mut config = support::config(&server, &[]);
+    config.deadline = Duration::from_millis(300);
+    let host = support::start(
+        config,
+        &[("provider", REPLICATE), ("replicate-token", TOKEN)],
+    );
+    let error = host
+        .generate_retouch(support::request(), &support::image(), &support::coverage())
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::Unavailable);
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(creates(&server), 0);
+    host.finish().unwrap();
+}
+
+/// A poll that fails leaves the known prediction cancelled on Replicate.
+#[test]
+fn a_failed_poll_cancels_the_prediction() {
+    let server = slow_replicate(Duration::ZERO, 503);
+    let host = replicate_host(&server, &[]);
+    let error = host
+        .generate_retouch(support::request(), &support::image(), &support::coverage())
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::Unavailable);
+    assert!(
+        server
+            .requests()
+            .iter()
+            .any(|r| r.path == "/v1/predictions/p1/cancel")
+    );
+    host.finish().unwrap();
 }
