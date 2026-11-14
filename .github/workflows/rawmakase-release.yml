@@ -1,0 +1,51 @@
+# Written by `cargo rawmakase release`. On a tag v<version>, builds the
+# extension on every platform RAWmakase releases for, packages it with
+# `cargo rawmakase package` and attaches the packages to the tag's release,
+# where RAWmakase's Install from GitHub finds them.
+name: Release extension
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: linux-x86_64 }
+          - { os: ubuntu-24.04-arm, target: linux-aarch64 }
+          - { os: macos-15, target: macos-aarch64 }
+          - { os: macos-15-intel, target: macos-x86_64 }
+          - { os: windows-2025, target: windows-x86_64 }
+          - { os: windows-11-arm, target: windows-aarch64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          cargo install --locked --git https://github.com/pch/rawmakase cargo-rawmakase
+      - run: cargo rawmakase build
+      # Apple silicon runs only signed programs: an ad-hoc signature is enough
+      # for a program RAWmakase downloads itself.
+      - if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          for program in target/release/*; do
+            if [ -f "$program" ] && [ -x "$program" ]; then codesign --force --sign - "$program"; fi
+          done
+      - run: cargo rawmakase package --target ${{ matrix.target }}
+      - name: Attach to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes ""
+          gh release upload "$GITHUB_REF_NAME" target/rmext/*.rmext --clobber
