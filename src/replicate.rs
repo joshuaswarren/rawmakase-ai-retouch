@@ -174,7 +174,9 @@ impl Replicate {
         // Checked again before the paid call: it never starts once cancelled,
         // past the deadline, or with too little of it left to bound it.
         let agent = until.agent()?;
-        if until.left() < LEAST_CANCEL_AFTER {
+        // Read once: the check and the header must agree.
+        let left = until.left();
+        if left < LEAST_CANCEL_AFTER {
             return Err(ProviderError::Unavailable(
                 "the request timed out before the prediction could start".into(),
             ));
@@ -196,7 +198,7 @@ impl Replicate {
                 .header("Authorization", self.authorization())
                 .header("Prefer", format!("wait={WAIT}"))
                 // What is left of the request's own deadline, not a fresh one.
-                .header("Cancel-After", format!("{}s", until.left().as_secs()))
+                .header("Cancel-After", format!("{}s", left.as_secs()))
                 .content_type("application/json")
                 .send(body.to_string().as_bytes()),
         )?;
