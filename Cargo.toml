@@ -1,0 +1,32 @@
+[package]
+name = "rawmakase-ai-remove"
+version = "0.1.0"
+edition = "2024"
+description = "Experimental AI object removal for RAWmakase's Remove tool, through a hosted model and your own API key"
+license = "MIT"
+repository = "https://github.com/pch/rawmakase-ai-remove"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "rawmakase-ai-remove"
+path = "src/main.rs"
+
+[dependencies]
+# The SDK's API 3 (retouch generators, secret settings). For local work
+# before it reaches `main`, `.cargo/config.toml` (not committed) patches it to
+# a checkout.
+rawmakase-extension = { git = "https://github.com/pch/rawmakase", branch = "main" }
+serde_json = "1"
+# Data URIs for the images sent to the providers and read back from them.
+base64 = "0.22"
+# Encoding the region and the mask as PNG, and decoding what a provider
+# returns: PNG, JPEG or WebP.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+# Blocking HTTPS with rustls and its bundled roots: no OpenSSL, no system TLS.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[profile.release]
+strip = true
