@@ -22,6 +22,28 @@ Both models are Bria's, trained on licensed data, and take an image and a
 mask with no prompt. Prices are the services' as of November 2026; check
 their pages for the current ones.
 
+## Installing
+
+Install it from RAWmakase: **Preferences > Extensions > Available**, or
+**Install from GitHub…** with `https://github.com/pch/rawmakase-ai-remove`. It
+needs a RAWmakase with AI Remove ([pch/rawmakase#1093](https://github.com/pch/rawmakase/pull/1093)),
+which isn't in a release yet: RAWmakase 0.5.0 reads manifests up to `api = 2`
+and refuses this one as written for a newer RAWmakase.
+
+## Setting it up
+
+You need an account with fal.ai or Replicate, with billing set up, and its
+API key. [Getting an API key](docs/getting-a-key.md) walks through both
+services step by step and where the key goes in RAWmakase; the extension's
+settings link to it. Until a key is set, AI Remove says so and offers a
+button to its settings.
+
+**Environment variables.** When the key setting is empty, the extension reads
+`FAL_KEY` (fal.ai) or `REPLICATE_API_TOKEN` (Replicate) from its environment.
+RAWmakase passes its own environment on, but a GUI app started from a desktop
+launcher, the Dock or the Start menu usually doesn't see variables set in a
+shell profile (`.zshrc`, `.bashrc`), so the setting is the reliable place.
+
 ## Privacy and cost
 
 - **The region leaves your computer.** Each removal uploads the rendered
@@ -37,26 +59,6 @@ their pages for the current ones.
   its settings file. The extension never logs it, and removes anything shaped
   like a key from the services' error messages before you see them.
 
-## Setting it up
-
-1. Get a key:
-   - fal.ai: [fal.ai > Dashboard > Keys](https://fal.ai/dashboard/keys);
-   - Replicate: [replicate.com > Account > API tokens](https://replicate.com/account/api-tokens).
-   Both need billing set up on the service. **New to them?**
-   [Getting an API key](docs/getting-a-key.md) walks through the account,
-   billing and key step by step; the settings link to it too.
-2. In RAWmakase, open **Preferences > Extensions > AI Remove**, pick the
-   **Service** and paste the key into **fal.ai API key** or **Replicate API
-   token**.
-
-Until a key is set, AI Remove says so and points you to that page.
-
-**Environment variables.** When the key setting is empty, the extension reads
-`FAL_KEY` (fal.ai) or `REPLICATE_API_TOKEN` (Replicate) from its environment.
-RAWmakase passes its own environment on, but a GUI app started from a desktop
-launcher, the Dock or the Start menu usually doesn't see variables set in a
-shell profile (`.zshrc`, `.bashrc`), so the setting is the reliable place.
-
 ## Limitations
 
 - **8-bit.** The region travels as 8-bit sRGB both ways, so a removal over
@@ -69,14 +71,6 @@ shell profile (`.zshrc`, `.bashrc`), so the setting is the reliable place.
   without them.
 - The result depends on the service: it can change between calls and between
   model versions, and a service may decline an image on its content.
-
-## Installing
-
-Install it from RAWmakase: **Preferences > Extensions > Available**, or
-**Install from GitHub…** with `https://github.com/pch/rawmakase-ai-remove`. It
-needs a RAWmakase with AI Remove ([pch/rawmakase#1093](https://github.com/pch/rawmakase/pull/1093)),
-which isn't in a release yet: RAWmakase 0.5.0 reads manifests up to `api = 2`
-and refuses this one as written for a newer RAWmakase.
 
 ## Building and releasing
 
