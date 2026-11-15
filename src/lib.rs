@@ -60,7 +60,7 @@ pub const FAL_KEY_ENV: &str = "FAL_KEY";
 pub const REPLICATE_TOKEN_ENV: &str = "REPLICATE_API_TOKEN";
 
 /// Where to tell the user to set a key.
-const WHERE: &str = "Preferences > Extensions > AI Remove";
+const WHERE: &str = "Preferences > Extensions > AI Retouch";
 
 /// Reads an environment variable.
 pub type Env = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;

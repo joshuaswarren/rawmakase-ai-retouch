@@ -365,7 +365,7 @@ fn boundary(data: &[u8]) -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
     (0u32..)
-        .map(|n| format!("rawmakase-ai-remove-{seed:x}-{n}"))
+        .map(|n| format!("rawmakase-ai-retouch-{seed:x}-{n}"))
         .find(|b| !data.windows(b.len()).any(|w| w == b.as_bytes()))
         .expect("some boundary is free")
 }

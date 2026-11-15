@@ -301,7 +301,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rawmakase-ai-remove"
+name = "rawmakase-ai-retouch"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",

@@ -1,6 +1,6 @@
 # Getting an API key
 
-AI Remove runs on a hosted AI service with your own account, so you need an
+AI Retouch runs on a hosted AI service with your own account, so you need an
 account and an API key with one of them: **fal.ai** (the default) or
 **Replicate**. You only need one. Each removal is one paid call to the
 service, about $0.04 with the default models (November 2026; check the
@@ -49,7 +49,7 @@ want another model that takes an image and a mask.
 
 ## Putting the key into RAWmakase
 
-1. Open **Preferences > Extensions** and choose **AI Remove**.
+1. Open **Preferences > Extensions** and choose **AI Retouch**.
 2. Under **Settings**, pick the **Service** you signed up with.
 3. Paste the key into its field and choose **Save**; the field then says the
    key is set. RAWmakase keeps it in your system's credential store (Keychain

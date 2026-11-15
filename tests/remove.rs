@@ -3,7 +3,7 @@
 //! Replicate. Nothing here reaches the network.
 mod support;
 
-use rawmakase_ai_remove::{DEFAULT_REPLICATE_MODEL, FAL, FAL_MODEL, REPLICATE};
+use rawmakase_ai_retouch::{DEFAULT_REPLICATE_MODEL, FAL, FAL_MODEL, REPLICATE};
 use rawmakase_extension::ErrorCode;
 use rawmakase_extension::protocol::manifest::{Manifest, RETOUCH_GENERATOR_API, SettingControl};
 use serde_json::{Value, json};
@@ -137,7 +137,7 @@ fn without_a_key_it_needs_setup_and_calls_nothing() {
     assert!(
         error
             .message
-            .contains("Preferences > Extensions > AI Remove"),
+            .contains("Preferences > Extensions > AI Retouch"),
         "{error}"
     );
     host.finish().unwrap();
@@ -209,7 +209,7 @@ fn fal_statuses_map_to_what_the_user_can_do() {
         assert!(
             error
                 .message
-                .contains("Preferences > Extensions > AI Remove"),
+                .contains("Preferences > Extensions > AI Retouch"),
             "{error}"
         );
     }
@@ -541,7 +541,7 @@ fn replicate_failures_map_to_what_the_user_can_do() {
     assert!(
         error
             .message
-            .contains("Preferences > Extensions > AI Remove"),
+            .contains("Preferences > Extensions > AI Retouch"),
         "{error}"
     );
     assert_eq!(requests.len(), 1, "no retry: {requests:?}");
@@ -642,14 +642,14 @@ fn the_manifest_declares_what_the_program_implements() {
     let manifest = Manifest::parse(include_str!("../rawmakase-extension.toml")).unwrap();
     let e = &manifest.extension;
     assert_eq!(e.id, "dev.pch.ai-remove");
-    assert_eq!(e.name, "AI Remove");
+    assert_eq!(e.name, "AI Retouch");
     assert_eq!(e.version.to_string(), env!("CARGO_PKG_VERSION"));
     assert_eq!(e.api, RETOUCH_GENERATOR_API);
     // RAWmakase 0.5.0 and later.
     assert_eq!(e.rawmakase.to_string(), ">=0.5");
     assert_eq!(
         e.repository.as_deref(),
-        Some("https://github.com/pch/rawmakase-ai-remove")
+        Some("https://github.com/pch/rawmakase-ai-retouch")
     );
     assert!(manifest.access.network);
     let program = manifest.program.as_ref().unwrap();
@@ -657,13 +657,13 @@ fn the_manifest_declares_what_the_program_implements() {
     let [generator] = &manifest.retouch_generators[..] else {
         panic!("one retouch generator");
     };
-    assert_eq!(generator.id, rawmakase_ai_remove::GENERATOR);
+    assert_eq!(generator.id, rawmakase_ai_retouch::GENERATOR);
     assert!(generator.uploads);
 
     // The program implements exactly what the manifest contributes.
     let server = Server::start(|_| Reply::json(500, json!({})));
     let host = rawmakase_extension::mock::MockHost::start_with_options(
-        rawmakase_ai_remove::extension_with(support::config(&server, &[])),
+        rawmakase_ai_retouch::extension_with(support::config(&server, &[])),
         rawmakase_extension::ServeOptions { api: e.api },
         |_, _| Ok(Value::Null),
     );
@@ -677,7 +677,7 @@ fn the_manifest_declares_what_the_program_implements() {
     host.finish().unwrap();
 
     // The settings the program reads, with the defaults it assumes.
-    use rawmakase_ai_remove::setting;
+    use rawmakase_ai_retouch::setting;
     let control = |id: &str| {
         let s = manifest
             .settings

@@ -18,7 +18,7 @@ pub(crate) fn agent(timeout: Duration) -> Agent {
         .timeout_global(Some(timeout))
         .timeout_connect(Some(Duration::from_secs(15).min(timeout)))
         .http_status_as_error(false)
-        .user_agent(concat!("rawmakase-ai-remove/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("rawmakase-ai-retouch/", env!("CARGO_PKG_VERSION")))
         .build()
         .into()
 }

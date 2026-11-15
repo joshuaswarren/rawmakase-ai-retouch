@@ -25,7 +25,7 @@ their pages for the current ones.
 ## Installing
 
 Install it from RAWmakase: **Preferences > Extensions > Available**, or
-**Install from GitHub…** with `https://github.com/pch/rawmakase-ai-remove`. It
+**Install from GitHub…** with `https://github.com/pch/rawmakase-ai-retouch`. It
 needs a RAWmakase with AI Remove ([pch/rawmakase#1093](https://github.com/pch/rawmakase/pull/1093)),
 which isn't in a release yet: RAWmakase 0.5.0 reads manifests up to `api = 2`
 and refuses this one as written for a newer RAWmakase.

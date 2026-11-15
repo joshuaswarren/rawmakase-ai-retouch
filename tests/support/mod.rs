@@ -2,7 +2,7 @@
 //! shaped as the app sends them.
 #![allow(dead_code)]
 
-use rawmakase_ai_remove::Config;
+use rawmakase_ai_retouch::Config;
 use rawmakase_extension::ServeOptions;
 use rawmakase_extension::mock::MockHost;
 use rawmakase_extension::protocol::buffer::{
@@ -187,7 +187,7 @@ pub fn config(server: &Server, env: &[(&str, &str)]) -> Config {
 /// handshake with `settings`.
 pub fn start(config: Config, settings: &[(&str, &str)]) -> MockHost {
     let host = MockHost::start_with_options(
-        rawmakase_ai_remove::extension_with(config),
+        rawmakase_ai_retouch::extension_with(config),
         ServeOptions { api: 3 },
         |_, _| Ok(Value::Null),
     );
