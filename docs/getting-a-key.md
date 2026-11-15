@@ -58,9 +58,9 @@ want another model that takes an image and a mask.
    on macOS, Credential Manager on Windows, the Secret Service on Linux),
    never in its settings file, and never shows it again. To change it, paste
    a new one and Save; **Remove** deletes it.
-4. Choose the **Remove** tool, set **Mode** to **AI Remove** or **AI
-   Replace**, write what to do in the field under Mode (AI Replace needs it)
-   and paint over the area. The first time, RAWmakase asks whether it may
+4. Choose the **AI Retouch** tool (the magic wand on Develop's rail), set
+   **Mode** to **AI Remove** or **AI Replace**, write what to do in the field
+   under Mode (AI Replace needs it) and paint over the area. The first time, RAWmakase asks whether it may
    send the area to the service: choose **Send**.
 
 ## If something goes wrong

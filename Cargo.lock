@@ -314,7 +314,7 @@ dependencies = [
 [[package]]
 name = "rawmakase-extension"
 version = "0.1.0"
-source = "git+https://github.com/pch/rawmakase?rev=f29a49d22be6b4a466473bbeefde3e1490737643#f29a49d22be6b4a466473bbeefde3e1490737643"
+source = "git+https://github.com/pch/rawmakase?rev=8335cb25647c5dbcb929272f875b2c77f3feda70#8335cb25647c5dbcb929272f875b2c77f3feda70"
 dependencies = [
  "libc",
  "rawmakase-extension-protocol",
@@ -326,7 +326,7 @@ dependencies = [
 [[package]]
 name = "rawmakase-extension-protocol"
 version = "0.1.0"
-source = "git+https://github.com/pch/rawmakase?rev=f29a49d22be6b4a466473bbeefde3e1490737643#f29a49d22be6b4a466473bbeefde3e1490737643"
+source = "git+https://github.com/pch/rawmakase?rev=8335cb25647c5dbcb929272f875b2c77f3feda70#8335cb25647c5dbcb929272f875b2c77f3feda70"
 dependencies = [
  "schemars",
  "semver",

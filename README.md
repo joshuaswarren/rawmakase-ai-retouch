@@ -1,8 +1,8 @@
 # AI Retouch for RAWmakase
 
 **Experimental.** A [RAWmakase](https://github.com/pch/rawmakase) extension
-that adds two modes to the Remove tool, each run by a hosted AI model with
-your own account and API key:
+that adds an **AI Retouch** tool to Develop's rail (a magic wand) with two
+modes, each run by a hosted AI model with your own account and API key:
 
 - **AI Remove**: paint over an object and the model fills the area with what
   could plausibly be behind it. You can also say what to do, for example
@@ -94,7 +94,7 @@ shell profile (`.zshrc`, `.bashrc`), so the setting is the reliable place.
 cargo test                         # no network, no key needed
 # The RAWmakase commit the SDK is pinned to: it reads `api = 3`.
 cargo install --locked --git https://github.com/pch/rawmakase \
-    --rev f29a49d22be6b4a466473bbeefde3e1490737643 cargo-rawmakase
+    --rev 8335cb25647c5dbcb929272f875b2c77f3feda70 cargo-rawmakase
 cargo rawmakase dev                # try it in RAWmakase's developer mode
 cargo rawmakase build && cargo rawmakase package
 ```

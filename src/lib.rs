@@ -1,4 +1,4 @@
-//! AI Retouch: AI Remove and AI Replace for RAWmakase's Remove tool through
+//! AI Retouch: AI Remove and AI Replace for RAWmakase's AI Retouch tool through
 //! a hosted model, with the user's own API key.
 //!
 //! The app sends `retouch.generate` with a region of the photo (8-bit sRGB),
@@ -151,7 +151,7 @@ enum Kind {
 }
 
 impl Kind {
-    /// What the Remove tool calls it.
+    /// Its mode's name in the AI Retouch tool.
     fn name(self) -> &'static str {
         match self {
             Self::Remove => "AI Remove",
