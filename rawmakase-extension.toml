@@ -19,21 +19,21 @@ start = "on-demand"
 [[setting]]
 id = "provider"
 name = "Service"
-help = "Where the removal runs. Each removal is one paid call to it."
+help = "Where the removal runs. Each removal is one paid call to it. No account yet? https://github.com/pch/rawmakase-ai-remove/blob/main/docs/getting-a-key.md"
 control = { segmented = ["fal.ai", "Replicate"] }
 default = "fal.ai"
 
 [[setting]]
 id = "fal-key"
 name = "fal.ai API key"
-help = "From fal.ai > Dashboard > Keys. Used when Service is fal.ai."
+help = "From fal.ai > Dashboard > Keys, with the API preset. Used when Service is fal.ai. How to get one: https://github.com/pch/rawmakase-ai-remove/blob/main/docs/getting-a-key.md#falai"
 control = "secret"
 default = ""
 
 [[setting]]
 id = "replicate-token"
 name = "Replicate API token"
-help = "From replicate.com > Account > API tokens. Used when Service is Replicate."
+help = "From replicate.com > Account > API tokens. Used when Service is Replicate. How to get one: https://github.com/pch/rawmakase-ai-remove/blob/main/docs/getting-a-key.md#replicate"
 control = "secret"
 default = ""
 

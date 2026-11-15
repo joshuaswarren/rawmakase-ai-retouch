@@ -42,7 +42,9 @@ their pages for the current ones.
 1. Get a key:
    - fal.ai: [fal.ai > Dashboard > Keys](https://fal.ai/dashboard/keys);
    - Replicate: [replicate.com > Account > API tokens](https://replicate.com/account/api-tokens).
-   Both need billing set up on the service.
+   Both need billing set up on the service. **New to them?**
+   [Getting an API key](docs/getting-a-key.md) walks through the account,
+   billing and key step by step; the settings link to it too.
 2. In RAWmakase, open **Preferences > Extensions > AI Remove**, pick the
    **Service** and paste the key into **fal.ai API key** or **Replicate API
    token**.
