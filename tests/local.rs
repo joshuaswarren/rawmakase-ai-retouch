@@ -257,3 +257,24 @@ fn a_part_that_is_already_whole_is_checked_without_asking_the_server() {
     assert_eq!(std::fs::read(saved_model(&dir)).unwrap(), MODEL);
     host.finish().unwrap();
 }
+
+#[test]
+fn a_part_the_server_cannot_continue_is_dropped_and_the_next_request_starts_over() {
+    let server = Server::start(|r| match r.header("range") {
+        // A range past the end of what the server has, as a 416 says.
+        Some(_) => Reply::json(416, json!({})),
+        None => Reply::bytes("application/octet-stream", MODEL.to_vec()),
+    });
+    let dir = fresh_dir("past-the-end");
+    std::fs::write(saved_model(&dir).with_extension("part"), &MODEL[..100]).unwrap();
+    let host = support::start_in(config(&server), &[], dir.clone());
+    let error = host
+        .generate_retouch(local_request(), &support::image(), &support::coverage())
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::Unavailable);
+    assert!(error.message.contains("restarts"), "{}", error.message);
+    host.generate_retouch(local_request(), &support::image(), &support::coverage())
+        .unwrap();
+    assert_eq!(std::fs::read(saved_model(&dir)).unwrap(), MODEL);
+    host.finish().unwrap();
+}

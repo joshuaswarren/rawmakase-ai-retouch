@@ -21,7 +21,7 @@ use crate::provider::{Provider, ProviderError};
 use image::RgbImage;
 use image::imageops::{FilterType, resize};
 use sha2::{Digest, Sha256};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -142,6 +142,7 @@ fn ensure(
     let part = done.with_extension("part");
     let mut out = std::fs::OpenOptions::new()
         .create(true)
+        .read(true)
         .append(true)
         .open(&part)
         .map_err(io)?;
@@ -166,7 +167,11 @@ fn ensure(
         )));
     }
     out.sync_all().map_err(io)?;
-    if sha256_of(&part).map_err(io)? != file.sha256 {
+    // Read back through the handle that holds the lock: on Windows another
+    // handle could not read the locked part.
+    let hash = hash_of(&mut out).map_err(io)?;
+    drop(out);
+    if hash != file.sha256 {
         let _ = std::fs::remove_file(&part);
         return Err(unavailable(
             "the downloaded model didn't match its checksum (SHA-256), so it was deleted; \
@@ -241,7 +246,12 @@ fn download(
 }
 
 fn sha256_of(path: &Path) -> std::io::Result<String> {
-    let mut file = std::fs::File::open(path)?;
+    hash_of(&mut std::fs::File::open(path)?)
+}
+
+/// The SHA-256 of all of `file`, as lowercase hex.
+fn hash_of(file: &mut std::fs::File) -> std::io::Result<String> {
+    file.seek(std::io::SeekFrom::Start(0))?;
     let mut hash = Sha256::new();
     let mut chunk = vec![0u8; 1 << 16];
     loop {
