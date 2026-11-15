@@ -19,37 +19,41 @@ start = "on-demand"
 [[setting]]
 id = "provider"
 name = "Service"
-help = "Where the removal runs. Each removal is one paid call to it. No account yet? https://github.com/pch/rawmakase-ai-retouch/blob/main/docs/getting-a-key.md"
+help = "Where AI Remove and AI Replace run. Each request is one paid call to it. No account yet? [Getting an API key](https://github.com/pch/rawmakase-ai-retouch/blob/main/docs/getting-a-key.md)"
 control = { segmented = ["fal.ai", "Replicate"] }
 default = "fal.ai"
 
 [[setting]]
 id = "fal-key"
 name = "fal.ai API key"
-help = "From fal.ai > Dashboard > Keys, with the API preset. Used when Service is fal.ai. How to get one: https://github.com/pch/rawmakase-ai-retouch/blob/main/docs/getting-a-key.md#falai"
+help = "From fal.ai > Dashboard > Keys, with the API preset. [How to get one](https://github.com/pch/rawmakase-ai-retouch/blob/main/docs/getting-a-key.md#falai)"
 control = "secret"
 default = ""
+visible-when = { setting = "provider", equals = "fal.ai" }
 
 [[setting]]
 id = "replicate-token"
 name = "Replicate API token"
-help = "From replicate.com > Account > API tokens. Used when Service is Replicate. How to get one: https://github.com/pch/rawmakase-ai-retouch/blob/main/docs/getting-a-key.md#replicate"
+help = "From replicate.com > Account > API tokens. [How to get one](https://github.com/pch/rawmakase-ai-retouch/blob/main/docs/getting-a-key.md#replicate)"
 control = "secret"
 default = ""
+visible-when = { setting = "provider", equals = "Replicate" }
 
 [[setting]]
 id = "replace-model"
 name = "Replace model"
-help = "What AI Replace uses on fal.ai: Bria GenFill ($0.04 a megapixel) or FLUX.1 Fill [pro] ($0.05 a megapixel) fill the area with what you describe; Bria FIBO Edit ($0.04 an image) follows an instruction. On Replicate, AI Replace uses bria/fibo-edit."
+help = "What AI Replace uses: Bria GenFill ($0.04 a megapixel) or FLUX.1 Fill [pro] ($0.05 a megapixel) fill the area with what you describe; Bria FIBO Edit ($0.04 an image) follows an instruction."
 control = { choice = ["Bria GenFill", "FLUX.1 Fill [pro]", "Bria FIBO Edit"] }
 default = "Bria GenFill"
+visible-when = { setting = "provider", equals = "fal.ai" }
 
 [[setting]]
 id = "replicate-model"
 name = "Replicate model"
-help = "What AI Remove uses on Replicate without text: owner/name or owner/name:version of a model that takes an image and a mask. With text, it uses bria/fibo-edit."
+help = "What AI Remove uses without text: owner/name or owner/name:version of a model that takes an image and a mask. With text, and for AI Replace, bria/fibo-edit."
 control = "text"
 default = "bria/eraser"
+visible-when = { setting = "provider", equals = "Replicate" }
 
 [[retouch-generator]]
 id = "remove"

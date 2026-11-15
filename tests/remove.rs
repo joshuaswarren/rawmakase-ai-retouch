@@ -728,6 +728,19 @@ fn the_manifest_declares_what_the_program_implements() {
         )
     );
     assert_eq!(manifest.settings.len(), 5);
+    // Each service's settings show only while it is chosen.
+    let shown_for = |id: &str| {
+        let s = manifest.settings.iter().find(|s| s.id == id).unwrap();
+        s.visible_when.as_ref().map(|w| {
+            assert_eq!(w.setting, setting::PROVIDER);
+            w.equals.as_str().unwrap().to_string()
+        })
+    };
+    assert_eq!(shown_for(setting::PROVIDER), None);
+    assert_eq!(shown_for(setting::FAL_KEY).as_deref(), Some(FAL));
+    assert_eq!(shown_for(setting::REPLACE_MODEL).as_deref(), Some(FAL));
+    assert_eq!(shown_for(setting::REPLICATE_TOKEN).as_deref(), Some(REPLICATE));
+    assert_eq!(shown_for(setting::REPLICATE_MODEL).as_deref(), Some(REPLICATE));
 }
 
 /// Replicate's files and predictions, each upload answered after `upload`,
