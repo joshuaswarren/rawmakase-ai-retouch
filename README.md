@@ -94,7 +94,7 @@ shell profile (`.zshrc`, `.bashrc`), so the setting is the reliable place.
 cargo test                         # no network, no key needed
 # The RAWmakase commit the SDK is pinned to: it reads `api = 3`.
 cargo install --locked --git https://github.com/pch/rawmakase \
-    --rev 2f03585df062bf6f3f0ea377af0034f2161ab44e cargo-rawmakase
+    --rev f29a49d22be6b4a466473bbeefde3e1490737643 cargo-rawmakase
 cargo rawmakase dev                # try it in RAWmakase's developer mode
 cargo rawmakase build && cargo rawmakase package
 ```

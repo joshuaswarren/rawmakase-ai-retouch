@@ -302,7 +302,7 @@ dependencies = [
 
 [[package]]
 name = "rawmakase-ai-retouch"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "image",
@@ -314,7 +314,7 @@ dependencies = [
 [[package]]
 name = "rawmakase-extension"
 version = "0.1.0"
-source = "git+https://github.com/pch/rawmakase?rev=2f03585df062bf6f3f0ea377af0034f2161ab44e#2f03585df062bf6f3f0ea377af0034f2161ab44e"
+source = "git+https://github.com/pch/rawmakase?rev=f29a49d22be6b4a466473bbeefde3e1490737643#f29a49d22be6b4a466473bbeefde3e1490737643"
 dependencies = [
  "libc",
  "rawmakase-extension-protocol",
@@ -326,7 +326,7 @@ dependencies = [
 [[package]]
 name = "rawmakase-extension-protocol"
 version = "0.1.0"
-source = "git+https://github.com/pch/rawmakase?rev=2f03585df062bf6f3f0ea377af0034f2161ab44e#2f03585df062bf6f3f0ea377af0034f2161ab44e"
+source = "git+https://github.com/pch/rawmakase?rev=f29a49d22be6b4a466473bbeefde3e1490737643#f29a49d22be6b4a466473bbeefde3e1490737643"
 dependencies = [
  "schemars",
  "semver",
