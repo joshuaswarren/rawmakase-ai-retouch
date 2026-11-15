@@ -142,8 +142,9 @@ fn ensure(
     let part = done.with_extension("part");
     let mut out = std::fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
-        .append(true)
+        .write(true)
         .open(&part)
         .map_err(io)?;
     // One writer at a time: a request cancelled mid-download can leave its
@@ -227,6 +228,8 @@ fn download(
             )));
         }
     }
+    // Not append mode: Windows refuses to resize a file opened only to append.
+    out.seek(std::io::SeekFrom::Start(have)).map_err(io)?;
     let mut body = response.body_mut().as_reader();
     let mut chunk = vec![0u8; 1 << 16];
     while have < file.bytes && started.elapsed() <= budget {
