@@ -42,9 +42,9 @@ visible-when = { setting = "provider", equals = "Replicate" }
 [[setting]]
 id = "replace-model"
 name = "Replace model"
-help = "What AI Replace uses: Bria GenFill ($0.04 a megapixel) or FLUX.1 Fill [pro] ($0.05 a megapixel) fill the area with what you describe; Bria FIBO Edit ($0.04 an image) follows an instruction."
-control = { choice = ["Bria GenFill", "FLUX.1 Fill [pro]", "Bria FIBO Edit"] }
-default = "Bria GenFill"
+help = "What AI Replace uses: Nano Banana ($0.04 an image) edits what you paint as the prompt says; Bria GenFill ($0.04 a megapixel) or FLUX.1 Fill [pro] ($0.05 a megapixel) fill it with what you describe; Bria FIBO Edit ($0.04 an image) follows an instruction."
+control = { choice = ["Nano Banana", "Bria GenFill", "FLUX.1 Fill [pro]", "Bria FIBO Edit"] }
+default = "Nano Banana"
 visible-when = { setting = "provider", equals = "fal.ai" }
 
 [[setting]]
@@ -56,15 +56,13 @@ default = "bria/eraser"
 visible-when = { setting = "provider", equals = "Replicate" }
 
 [[retouch-generator]]
-id = "remove"
-name = "AI Remove"
+id = "retouch"
+name = "AI Retouch"
 uploads = true
-prompt = "optional"
-prompt-hint = "e.g. remove the dogs, keep the people"
+panel = "retouch"
 
-[[retouch-generator]]
-id = "replace"
-name = "AI Replace"
-uploads = true
-prompt = "required"
-prompt-hint = "e.g. a wooden bench"
+# Remove or Replace, and the prompt: in the tool's drawer.
+[[panel]]
+id = "retouch"
+title = "AI Retouch"
+place = "generator"

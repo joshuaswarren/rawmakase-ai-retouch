@@ -1,18 +1,23 @@
 # AI Retouch for RAWmakase
 
 **Experimental.** A [RAWmakase](https://github.com/pch/rawmakase) extension
-that adds an **AI Retouch** tool to Develop's rail (a magic wand) with two
-modes, each run by a hosted AI model with your own account and API key:
+that adds an **AI Retouch** tool to Develop's rail (a magic wand), run by a
+hosted AI model with your own account and API key. Its drawer has a **Mode**
+and a **Prompt**:
 
 - **AI Remove**: paint over an object and the model fills the area with what
   could plausibly be behind it. You can also say what to do, for example
   *remove the dogs, keep the people*, when you paint over both.
-- **AI Replace**: describe what to put there, for example *a wooden bench*,
-  then paint over the area.
+- **AI Replace**: say what to do with the area, for example *change the shoes
+  to elegant high heels* or *a wooden bench*.
+
+Paint in as many strokes as it takes, then send the area with the drawer's
+button or Enter. The prompt and mode are kept, between photos and after
+RAWmakase restarts.
 
 RAWmakase does all the colour work. It renders the region around what you
-painted, sends it to this extension as 8-bit sRGB with the painted area and
-what you wrote, and keeps the pixels it gets back as a patch in your edit,
+painted, sends it to this extension as 8-bit sRGB with the painted area, and
+keeps the pixels it gets back as a patch in your edit,
 which renders without the extension or the service from then on. The
 extension only turns pixels into pixels through the service.
 
@@ -24,7 +29,7 @@ The model follows what you ask for:
 | --- | --- | --- |
 | AI Remove, nothing written | Bria FIBO Eraser, [`bria/fibo-edit-1.5/eraser`](https://fal.ai/models/bria/fibo-edit-1.5/eraser), pixel-perfect mode: only the masked area is rebuilt. $0.04 | Bria Eraser, [`bria/eraser`](https://replicate.com/bria/eraser), or another model that takes `image` and `mask` named in the settings. $0.04 |
 | AI Remove, with what to do | Bria FIBO Edit, [`bria/fibo-edit-1.5/edit`](https://fal.ai/models/bria/fibo-edit-1.5/edit), with your text as its instruction. $0.04 | Bria FIBO Edit, [`bria/fibo-edit`](https://replicate.com/bria/fibo-edit) |
-| AI Replace | The **Replace model** setting: Bria GenFill, [`bria/genfill/v2`](https://fal.ai/models/bria/genfill/v2) ($0.04 a megapixel, the default); FLUX.1 Fill \[pro], [`fal-ai/flux-pro/v1/fill`](https://fal.ai/models/fal-ai/flux-pro/v1/fill) ($0.05 a megapixel, rounded up); or Bria FIBO Edit ($0.04) | Bria FIBO Edit, [`bria/fibo-edit`](https://replicate.com/bria/fibo-edit) |
+| AI Replace | The **Replace model** setting: Nano Banana (Gemini 2.5 Flash Image), [`fal-ai/nano-banana/edit`](https://fal.ai/models/fal-ai/nano-banana/edit) ($0.04, the default), which edits what you paint as the prompt says; Bria GenFill, [`bria/genfill/v2`](https://fal.ai/models/bria/genfill/v2) ($0.04 a megapixel) or FLUX.1 Fill \[pro], [`fal-ai/flux-pro/v1/fill`](https://fal.ai/models/fal-ai/flux-pro/v1/fill) ($0.05 a megapixel, rounded up), which fill it with what you describe; or Bria FIBO Edit ($0.04) | Bria FIBO Edit, [`bria/fibo-edit`](https://replicate.com/bria/fibo-edit) |
 
 A region is at most 2048 pixels a side, about 4 megapixels, so a
 per-megapixel model costs at most about $0.17 (GenFill) or $0.25 (FLUX) a
@@ -32,8 +37,10 @@ request. The Bria models are trained on licensed data. Prices are the
 services' as of November 2026; check their pages for the current ones.
 
 **Text and the edit models.** The eraser rebuilds only the painted area. FIBO
-Edit and the fill models generate the painted area from your text; RAWmakase
-keeps only what they return inside it. Inside the area, an instruction such
+Edit and the fill models generate the painted area from your text; Nano Banana
+takes no mask and may redraw the whole region (padded to an aspect ratio it
+takes, then cut back); RAWmakase keeps only what they return inside what you
+painted. Inside the area, an instruction such
 as *keep the people* is followed as well as the model follows it: check the
 result, and undo it if it changed what it should have kept.
 

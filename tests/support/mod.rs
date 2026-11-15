@@ -195,22 +195,38 @@ pub fn start(config: Config, settings: &[(&str, &str)]) -> MockHost {
         .iter()
         .map(|(k, v)| (k.to_string(), Value::String(v.to_string())))
         .collect();
+    // A data folder of its own: the panel keeps its values there.
+    static HOSTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = HOSTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let data_dir = std::env::temp_dir().join(format!(
+        "rawmakase-ai-retouch-test-{}-{n}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&data_dir);
     let hello = host
         .hello_with(Hello {
             settings,
             extension: "dev.pch.ai-remove".into(),
-            contributions: vec![
-                "retouch-generator/remove".into(),
-                "retouch-generator/replace".into(),
-            ],
+            contributions: vec!["retouch-generator/retouch".into(), "panel/retouch".into()],
+            data_dir,
             ..MockHost::hello_params()
         })
         .unwrap();
     assert_eq!(
         hello.implements,
-        ["retouch-generator/remove", "retouch-generator/replace"]
+        ["panel/retouch", "retouch-generator/retouch"]
     );
     host
+}
+
+/// Sets the panel as the user would: the mode (`remove` or `replace`) and
+/// the prompt.
+pub fn ask(host: &MockHost, mode: &str, prompt: &str) {
+    let panel = rawmakase_ai_retouch::PANEL;
+    host.change(panel, rawmakase_ai_retouch::MODE, Value::from(mode))
+        .unwrap();
+    host.change(panel, rawmakase_ai_retouch::PROMPT, Value::from(prompt))
+        .unwrap();
 }
 
 pub const W: u32 = 64;
@@ -257,21 +273,11 @@ pub fn request() -> RetouchGenerate {
         ..image
     };
     RetouchGenerate {
-        generator: "remove".into(),
+        generator: rawmakase_ai_retouch::GENERATOR.into(),
         image,
         coverage,
         result,
         image_key: "0123456789abcdef".into(),
-        prompt: None,
-    }
-}
-
-/// [`request`] to `generator`, with what the user wrote.
-pub fn asking(generator: &str, prompt: Option<&str>) -> RetouchGenerate {
-    RetouchGenerate {
-        generator: generator.into(),
-        prompt: prompt.map(str::to_string),
-        ..request()
     }
 }
 

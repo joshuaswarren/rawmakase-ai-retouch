@@ -17,6 +17,7 @@
 //! Every request is one paid call to the provider, so nothing here retries.
 mod fal;
 mod http;
+mod panel;
 mod pixels;
 mod provider;
 mod replicate;
@@ -35,10 +36,9 @@ use std::time::{Duration, Instant};
 
 pub use sanitize::sanitize;
 
-/// The manifest's `[[retouch-generator]]` id of AI Remove.
-pub const GENERATOR: &str = "remove";
-/// The manifest's `[[retouch-generator]]` id of AI Replace.
-pub const REPLACE: &str = "replace";
+/// The manifest's `[[retouch-generator]]` id.
+pub const GENERATOR: &str = "retouch";
+pub use panel::{MODE, PANEL, PROMPT, REMOVE, REPLACE};
 
 /// The manifest's `[[setting]]` ids.
 pub mod setting {
@@ -50,8 +50,8 @@ pub mod setting {
     pub const REPLICATE_TOKEN: &str = "replicate-token";
     /// The Replicate model, `owner/name` or `owner/name:version`.
     pub const REPLICATE_MODEL: &str = "replicate-model";
-    /// The fal.ai model AI Replace uses: [`super::GENFILL`],
-    /// [`super::FLUX_FILL`] or [`super::FIBO_EDIT`].
+    /// The fal.ai model AI Replace uses: [`super::NANO_BANANA`],
+    /// [`super::GENFILL`], [`super::FLUX_FILL`] or [`super::FIBO_EDIT`].
     pub const REPLACE_MODEL: &str = "replace-model";
 }
 
@@ -68,7 +68,9 @@ pub const FAL_EDIT_MODEL: &str = fal::EDIT;
 /// The Replicate model a request with text calls.
 pub const REPLICATE_EDIT_MODEL: &str = replicate::EDIT_MODEL;
 
-/// The `replace-model` setting's value for Bria GenFill, the default.
+/// The `replace-model` setting's value for Nano Banana, the default.
+pub const NANO_BANANA: &str = "Nano Banana";
+/// The `replace-model` setting's value for Bria GenFill.
 pub const GENFILL: &str = "Bria GenFill";
 /// The `replace-model` setting's value for FLUX.1 Fill \[pro].
 pub const FLUX_FILL: &str = "FLUX.1 Fill [pro]";
@@ -124,21 +126,16 @@ pub fn extension() -> Extension {
 
 /// The extension, with `config`'s endpoints and environment.
 pub fn extension_with(config: Config) -> Extension {
+    let asked = panel::Shared::default();
     Extension::new()
         .retouch_generator(
             GENERATOR,
             Retouch {
-                config: config.clone(),
-                kind: Kind::Remove,
-            },
-        )
-        .retouch_generator(
-            REPLACE,
-            Retouch {
                 config,
-                kind: Kind::Replace,
+                asked: asked.clone(),
             },
         )
+        .panel(PANEL, panel::RetouchPanel(asked))
 }
 
 /// What a generator does with the painted area.
@@ -150,10 +147,10 @@ enum Kind {
     Replace,
 }
 
-/// The `remove` and `replace` retouch generators.
+/// The retouch generator: AI Remove or AI Replace, as its panel says.
 struct Retouch {
     config: Config,
-    kind: Kind,
+    asked: panel::Shared,
 }
 
 impl RetouchGenerator for Retouch {
@@ -164,9 +161,16 @@ impl RetouchGenerator for Retouch {
     ) -> Result<RetouchGenerated, RemoteError> {
         // Whatever a setting holds, a key pasted in the wrong field included,
         // is cleaned out of what choosing the provider says.
-        // Trimmed, one line and short: the SDK refuses a request otherwise.
-        let text = ask.request.prompt.clone();
-        let chosen = self.provider(cx.settings(), text).map_err(|mut e| {
+        // What the panel holds: the mode, and the prompt on one line.
+        let asked = self.asked.get(cx.data_dir());
+        let kind = if asked.replace {
+            Kind::Replace
+        } else {
+            Kind::Remove
+        };
+        let text = asked.text();
+        let summary = text.as_deref().map(summary);
+        let chosen = self.provider(cx.settings(), kind, text).map_err(|mut e| {
             let secrets: Vec<&str> = [
                 setting::FAL_KEY,
                 setting::REPLICATE_TOKEN,
@@ -204,6 +208,7 @@ impl RetouchGenerator for Retouch {
         let answer = RetouchGenerated {
             model: chosen.provider.model(),
             model_key: chosen.provider.model_key(),
+            summary,
         };
         if let Err(e) = answer.validate() {
             return Err(RemoteError::new(
@@ -211,7 +216,7 @@ impl RetouchGenerator for Retouch {
                 format!("the model's name doesn't fit: {}", e.message),
             ));
         }
-        let doing = match self.kind {
+        let doing = match kind {
             Kind::Remove => "Removing",
             Kind::Replace => "Replacing",
         };
@@ -252,13 +257,15 @@ impl Retouch {
     fn provider(
         &self,
         settings: &Map<String, Value>,
+        kind: Kind,
         text: Option<String>,
     ) -> Result<Chosen, RemoteError> {
         let config = &self.config;
-        if self.kind == Kind::Replace && text.is_none() {
+        // Nothing wrong with the request: the user has a prompt to write.
+        if kind == Kind::Replace && text.is_none() {
             return Err(RemoteError::new(
-                ErrorCode::InvalidRequest,
-                "AI Replace needs a description of what to put there",
+                ErrorCode::NeedsInput,
+                "AI Replace needs a prompt: say what to put where you paint",
             ));
         }
         if text_setting(settings, setting::PROVIDER) == REPLICATE {
@@ -299,15 +306,16 @@ impl Retouch {
                  shows how to get one."
             ))
         })?;
-        let model = match (self.kind, text) {
+        let model = match (kind, text) {
             (Kind::Remove, None) => fal::FalModel::Eraser,
             (Kind::Remove, Some(text)) => fal::FalModel::Edit(text),
             (Kind::Replace, text) => {
                 let text = text.unwrap_or_default();
                 match text_setting(settings, setting::REPLACE_MODEL) {
+                    GENFILL => fal::FalModel::GenFill(text),
                     FLUX_FILL => fal::FalModel::FluxFill(text),
                     FIBO_EDIT => fal::FalModel::Edit(text),
-                    _ => fal::FalModel::GenFill(text),
+                    _ => fal::FalModel::NanoBanana(text),
                 }
             }
         };
@@ -316,6 +324,19 @@ impl Retouch {
             secret: key,
         })
     }
+}
+
+/// `text` as an answer's summary: at most [`MAX_SUMMARY_LEN`] bytes, cut
+/// at a character.
+///
+/// [`MAX_SUMMARY_LEN`]: rawmakase_extension::protocol::method::MAX_SUMMARY_LEN
+fn summary(text: &str) -> String {
+    let max = rawmakase_extension::protocol::method::MAX_SUMMARY_LEN;
+    let mut end = text.len().min(max);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].trim_end().to_string()
 }
 
 /// A text setting, trimmed; `""` when it is missing or not text.

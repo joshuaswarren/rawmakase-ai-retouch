@@ -1,7 +1,7 @@
 //! fal.ai, on the synchronous endpoint `https://fal.run/<model>`, with one
 //! of the models [`FalModel`] names: Bria's FIBO Eraser for a plain removal,
-//! Bria's FIBO Edit for a removal with an instruction, and Bria GenFill, FLUX.1
-//! Fill \[pro] or FIBO Edit for a replacement.
+//! Bria's FIBO Edit for a removal with an instruction, and Nano Banana, Bria
+//! GenFill, FLUX.1 Fill \[pro] or FIBO Edit for a replacement.
 //!
 //! What this relies on, from fal's documentation (checked 2026-11):
 //!
@@ -26,6 +26,14 @@
 //!   ("The prompt to fill the masked part of the image"), and
 //!   `output_format` (`jpeg` by default; `png` here). $0.05 per megapixel,
 //!   rounded up. <https://fal.ai/models/fal-ai/flux-pro/v1/fill/api>
+//! - `fal-ai/nano-banana/edit` (Gemini 2.5 Flash Image) takes `prompt` and
+//!   `image_urls`, no mask, an `aspect_ratio` from a list (`auto`, `21:9`,
+//!   `16:9`, `3:2`, `4:3`, `5:4`, `1:1`, `4:5`, `3:4`, `2:3`, `9:16`) and
+//!   `output_format` (`png` here), and answers with `images`. Its page doesn't
+//!   say it keeps the input's size, so the region goes padded (its edges
+//!   mirrored) to the nearest ratio, and its own area is cut back out of the
+//!   answer resized to the padded size. $0.0398 per image.
+//!   <https://fal.ai/models/fal-ai/nano-banana/edit/api>
 //! - The Bria models answer with `image.url`; FLUX.1 Fill with `images`, a
 //!   list of `{url, width, height, content_type}` (one by default). White in
 //!   the mask is what to change in all four; the app keeps its own pixels
@@ -49,6 +57,7 @@
 //!   `content_policy_violation`.
 //!   <https://fal.ai/docs/documentation/model-apis/errors>
 use crate::http::{self, Reply};
+use crate::pixels;
 use crate::provider::{Provider, ProviderError, reads_as_refusal};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -61,6 +70,13 @@ pub(crate) const EDIT: &str = "bria/fibo-edit-1.5/edit";
 pub(crate) const GENFILL: &str = "bria/genfill/v2";
 /// FLUX.1 Fill \[pro], for a replacement.
 pub(crate) const FLUX_FILL: &str = "fal-ai/flux-pro/v1/fill";
+/// Nano Banana (Gemini 2.5 Flash Image) edit, for a replacement.
+pub(crate) const NANO_BANANA: &str = "fal-ai/nano-banana/edit";
+
+/// The aspect ratios Nano Banana takes (`aspect_ratio`), besides `auto`.
+const NANO_BANANA_RATIOS: [&str; 10] = [
+    "21:9", "16:9", "3:2", "4:3", "5:4", "1:1", "4:5", "3:4", "2:3", "9:16",
+];
 
 /// What a request asks of fal, with its text.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,6 +89,9 @@ pub(crate) enum FalModel {
     GenFill(String),
     /// Fill what is masked with what is described: [`FLUX_FILL`].
     FluxFill(String),
+    /// Edit the region as told, without a mask: [`NANO_BANANA`]. The app
+    /// keeps only what is painted.
+    NanoBanana(String),
 }
 
 impl FalModel {
@@ -82,6 +101,7 @@ impl FalModel {
             Self::Edit(_) => EDIT,
             Self::GenFill(_) => GENFILL,
             Self::FluxFill(_) => FLUX_FILL,
+            Self::NanoBanana(_) => NANO_BANANA,
         }
     }
 
@@ -110,6 +130,15 @@ impl FalModel {
                 "image_url": image,
                 "mask_url": mask,
                 "prompt": prompt,
+                "output_format": "png",
+                "sync_mode": true,
+            }),
+            // No mask: it edits the region as told; the ratio is filled in by
+            // `erase`, which pads the region to it.
+            Self::NanoBanana(prompt) => json!({
+                "prompt": prompt,
+                "image_urls": [image],
+                "num_images": 1,
                 "output_format": "png",
                 "sync_mode": true,
             }),
@@ -154,6 +183,7 @@ impl Provider for Fal {
         match self.model {
             FalModel::Eraser => format!("fal|{ERASER}|composite|1"),
             FalModel::FluxFill(_) => format!("fal|{FLUX_FILL}|png|1"),
+            FalModel::NanoBanana(_) => format!("fal|{NANO_BANANA}|png|padded|1"),
             _ => format!("fal|{}|1", self.model.id()),
         }
     }
@@ -167,10 +197,28 @@ impl Provider for Fal {
         if cancel() {
             return Err(ProviderError::Cancelled);
         }
-        let body = self.model.body(
-            http::data_uri("image/png", image_png),
+        // Nano Banana answers at an aspect ratio of its list, not the
+        // region's: the region goes padded to the nearest, and its own area
+        // is cut back out of the answer.
+        let padded = match self.model {
+            FalModel::NanoBanana(_) => {
+                let (rgb, w, h) = pixels::decode(image_png)?;
+                let padded = pixels::pad_to_aspect(&rgb, w, h, &NANO_BANANA_RATIOS);
+                let png = pixels::encode_rgb_png(&padded.rgb, padded.width, padded.height)?;
+                Some((padded, png, w, h))
+            }
+            _ => None,
+        };
+        let sent = padded
+            .as_ref()
+            .map_or(image_png, |(_, png, ..)| png.as_slice());
+        let mut body = self.model.body(
+            http::data_uri("image/png", sent),
             http::data_uri("image/png", mask_png),
         );
+        if let Some((padded, ..)) = &padded {
+            body["aspect_ratio"] = json!(padded.ratio);
+        }
         let agent = http::agent(self.timeout);
         let reply = http::read(
             agent
@@ -193,7 +241,13 @@ impl Provider for Fal {
             .or_else(|| answer["images"][0]["url"].as_str())
             .ok_or_else(|| ProviderError::Invalid("fal.ai's answer has no image".into()))?;
         // A URL fal hosts is public; the key stays with fal.run.
-        http::fetch_image(&agent, url, None)
+        let image = http::fetch_image(&agent, url, None)?;
+        let Some((padded, _, w, h)) = padded else {
+            return Ok(image);
+        };
+        let answer = pixels::decode_to_size(&image, padded.width, padded.height)?;
+        let region = pixels::crop(&answer, padded.width, padded.x, padded.y, w, h);
+        pixels::encode_rgb_png(&region, w, h)
     }
 }
 
