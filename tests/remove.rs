@@ -3,7 +3,10 @@
 //! Replicate. Nothing here reaches the network.
 mod support;
 
-use rawmakase_ai_retouch::{DEFAULT_REPLICATE_MODEL, FAL, FAL_MODEL, REPLICATE};
+use rawmakase_ai_retouch::{
+    DEFAULT_REPLICATE_MODEL, FAL, FAL_EDIT_MODEL, FAL_MODEL, FIBO_EDIT, FLUX_FILL, GENFILL,
+    REPLICATE, REPLICATE_EDIT_MODEL,
+};
 use rawmakase_extension::ErrorCode;
 use rawmakase_extension::protocol::manifest::{Manifest, RETOUCH_GENERATOR_API, SettingControl};
 use serde_json::{Value, json};
@@ -654,11 +657,22 @@ fn the_manifest_declares_what_the_program_implements() {
     assert!(manifest.access.network);
     let program = manifest.program.as_ref().unwrap();
     assert_eq!(program.path, concat!("bin/", env!("CARGO_PKG_NAME")));
-    let [generator] = &manifest.retouch_generators[..] else {
-        panic!("one retouch generator");
+    use rawmakase_extension::protocol::manifest::PromptUse;
+    let [remove, replace] = &manifest.retouch_generators[..] else {
+        panic!("two retouch generators");
     };
-    assert_eq!(generator.id, rawmakase_ai_retouch::GENERATOR);
-    assert!(generator.uploads);
+    assert_eq!(remove.id, rawmakase_ai_retouch::GENERATOR);
+    assert_eq!(
+        (remove.name.as_str(), remove.prompt),
+        ("AI Remove", PromptUse::Optional)
+    );
+    assert_eq!(replace.id, rawmakase_ai_retouch::REPLACE);
+    assert_eq!(
+        (replace.name.as_str(), replace.prompt),
+        ("AI Replace", PromptUse::Required)
+    );
+    assert!(remove.uploads && replace.uploads);
+    assert!(remove.prompt_hint.is_some() && replace.prompt_hint.is_some());
 
     // The program implements exactly what the manifest contributes.
     let server = Server::start(|_| Reply::json(500, json!({})));
@@ -706,7 +720,14 @@ fn the_manifest_declares_what_the_program_implements() {
         control(setting::REPLICATE_MODEL),
         (SettingControl::Text, json!(DEFAULT_REPLICATE_MODEL))
     );
-    assert_eq!(manifest.settings.len(), 4);
+    assert_eq!(
+        control(setting::REPLACE_MODEL),
+        (
+            SettingControl::Choice(vec![GENFILL.into(), FLUX_FILL.into(), FIBO_EDIT.into()]),
+            json!(GENFILL)
+        )
+    );
+    assert_eq!(manifest.settings.len(), 5);
 }
 
 /// Replicate's files and predictions, each upload answered after `upload`,
@@ -852,4 +873,183 @@ fn too_little_time_left_for_a_bounded_prediction_starts_none() {
         2
     );
     host.finish().unwrap();
+}
+
+/// The one fal.ai call a request made, answered with a flat image, and its
+/// answer.
+fn fal_call(
+    settings: &[(&str, &str)],
+    generator: &str,
+    prompt: Option<&str>,
+) -> (
+    rawmakase_extension::protocol::method::RetouchGenerated,
+    Request,
+) {
+    let server = Server::start(|r| match r.path.as_str() {
+        "/bria/fibo-edit-1.5/eraser"
+        | "/bria/fibo-edit-1.5/edit"
+        | "/bria/genfill/v2"
+        | "/fal-ai/flux-pro/v1/fill" => fal_answer(&data_png(W, H, [40, 50, 60])),
+        _ => Reply::json(404, json!({})),
+    });
+    let mut all = vec![("fal-key", KEY)];
+    all.extend_from_slice(settings);
+    let host = support::start(support::config(&server, &[]), &all);
+    let (answer, result) = host
+        .generate_retouch(
+            support::asking(generator, prompt),
+            &support::image(),
+            &support::coverage(),
+        )
+        .unwrap();
+    every_pixel_is(&result, [40, 50, 60]);
+    host.finish().unwrap();
+    let [call] = &server.requests()[..] else {
+        panic!("one call: {:?}", server.requests());
+    };
+    (answer, call.clone())
+}
+
+#[test]
+fn a_removal_with_text_goes_to_an_editor_that_follows_it() {
+    // Without text: the eraser, as before.
+    let (answer, call) = fal_call(&[], "remove", None);
+    assert_eq!(
+        (answer.model.as_str(), call.path.as_str()),
+        (FAL_MODEL, FAL_PATH)
+    );
+    assert!(call.json().get("instruction").is_none());
+
+    // With: FIBO Edit, the region its one reference and the mask what to edit.
+    let (answer, call) = fal_call(&[], "remove", Some("remove the dogs, keep the people"));
+    assert_eq!(answer.model, FAL_EDIT_MODEL);
+    assert_eq!(answer.model_key, "fal|bria/fibo-edit-1.5/edit|1");
+    assert_eq!(call.path, "/bria/fibo-edit-1.5/edit");
+    let body = call.json();
+    assert_eq!(
+        body["instruction"],
+        json!("remove the dogs, keep the people")
+    );
+    let references = body["image_urls"].as_array().unwrap();
+    assert_eq!(references.len(), 1);
+    assert!(
+        references[0]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/png;base64,")
+    );
+    assert!(
+        body["mask_url"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/png;base64,")
+    );
+    assert_eq!(body["sync_mode"], json!(true));
+    assert!(body.get("composite").is_none());
+    assert_eq!(call.header("x-fal-store-io"), Some("0"));
+}
+
+#[test]
+fn a_replacement_goes_to_the_fill_model_chosen() {
+    // Bria GenFill by default.
+    let (answer, call) = fal_call(&[], "replace", Some("a wooden bench"));
+    assert_eq!(answer.model, "bria/genfill/v2");
+    assert_eq!(call.path, "/bria/genfill/v2");
+    let body = call.json();
+    assert_eq!(body["instruction"], json!("a wooden bench"));
+    assert!(
+        body["image_url"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/png;base64,")
+    );
+    assert!(
+        body["mask_url"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/png;base64,")
+    );
+
+    let (answer, call) = fal_call(&[("replace-model", FLUX_FILL)], "replace", Some("a bench"));
+    assert_eq!(answer.model, "fal-ai/flux-pro/v1/fill");
+    assert_eq!(answer.model_key, "fal|fal-ai/flux-pro/v1/fill|png|1");
+    let body = call.json();
+    assert_eq!(body["prompt"], json!("a bench"));
+    // Lossless back, not FLUX's JPEG default.
+    assert_eq!(body["output_format"], json!("png"));
+
+    let (answer, call) = fal_call(&[("replace-model", FIBO_EDIT)], "replace", Some("a bench"));
+    assert_eq!(answer.model, FAL_EDIT_MODEL);
+    assert_eq!(call.json()["instruction"], json!("a bench"));
+}
+
+#[test]
+fn a_replacement_needs_text_and_text_must_fit() {
+    let server = Server::start(|_| fal_answer(&data_png(W, H, [0, 0, 0])));
+    let host = support::start(support::config(&server, &[]), &[("fal-key", KEY)]);
+    let error = host
+        .generate_retouch(
+            support::asking("replace", None),
+            &support::image(),
+            &support::coverage(),
+        )
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidRequest, "{error}");
+    assert!(error.message.contains("AI Replace"), "{error}");
+    // What the app would never send (blank, or too long) the SDK refuses
+    // before any call.
+    for prompt in ["  ".to_string(), "x".repeat(1001)] {
+        let error = host
+            .generate_retouch(
+                support::asking("remove", Some(&prompt)),
+                &support::image(),
+                &support::coverage(),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidRequest, "{error}");
+    }
+    assert!(server.requests().is_empty());
+    // A missing key names what needs it.
+    let host = support::start(support::config(&server, &[]), &[]);
+    let error = host
+        .generate_retouch(
+            support::asking("replace", Some("a bench")),
+            &support::image(),
+            &support::coverage(),
+        )
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::NeedsSetup);
+    assert!(
+        error
+            .message
+            .starts_with("AI Replace needs a fal.ai API key"),
+        "{error}"
+    );
+}
+
+#[test]
+fn replicate_takes_text_to_bria_fibo_edit() {
+    for generator in ["remove", "replace"] {
+        let server = replicate_server(succeeds_at(0));
+        // The removal model setting is for removals without text.
+        let host = replicate_host(&server, &[("replicate-model", "bria/eraser")]);
+        let (answer, result) = host
+            .generate_retouch(
+                support::asking(generator, Some("a wooden bench")),
+                &support::image(),
+                &support::coverage(),
+            )
+            .unwrap();
+        assert_eq!(answer.model, REPLICATE_EDIT_MODEL);
+        every_pixel_is(&result, [9, 8, 7]);
+        let requests = server.requests();
+        let create = requests
+            .iter()
+            .find(|r| r.path == "/v1/models/bria/fibo-edit/predictions")
+            .expect("a prediction of bria/fibo-edit");
+        let input = &create.json()["input"];
+        assert_eq!(input["instruction"], json!("a wooden bench"));
+        assert!(input["image"].is_string() && input["mask"].is_string());
+        host.finish().unwrap();
+    }
 }

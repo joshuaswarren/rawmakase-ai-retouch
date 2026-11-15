@@ -38,6 +38,11 @@ use ureq::Agent;
 
 /// The `replicate-model` setting's default.
 pub(crate) const DEFAULT_MODEL: &str = "bria/eraser";
+/// The model a request with text goes to: Bria's FIBO Edit, which takes
+/// `image`, `instruction` ("Text description of the desired edit") and
+/// `mask` ("White areas will be edited; black areas preserved"), from
+/// <https://replicate.com/bria/fibo-edit> (checked 2026-11).
+pub(crate) const EDIT_MODEL: &str = "bria/fibo-edit";
 
 /// How long `Prefer: wait` holds the create call: Replicate's maximum.
 const WAIT: u32 = 60;
@@ -55,16 +60,20 @@ pub(crate) struct Replicate {
     model: String,
     /// The version id, for a model named `owner/name:version`.
     version: Option<String>,
+    /// The `instruction` input, for [`EDIT_MODEL`].
+    instruction: Option<String>,
     deadline: Duration,
     poll_every: Duration,
 }
 
 impl Replicate {
-    /// Checks `model` is `owner/name` or `owner/name:version`.
+    /// Checks `model` is `owner/name` or `owner/name:version`. With an
+    /// `instruction`, it goes to the model as its `instruction` input.
     pub(crate) fn new(
         base: &str,
         token: &str,
         model: &str,
+        instruction: Option<String>,
         deadline: Duration,
         poll_every: Duration,
     ) -> Result<Self, String> {
@@ -95,6 +104,7 @@ impl Replicate {
             token: token.to_string(),
             model: name.to_string(),
             version: version.map(str::to_string),
+            instruction,
             deadline,
             poll_every,
         })
@@ -181,7 +191,10 @@ impl Replicate {
                 "the request timed out before the prediction could start".into(),
             ));
         }
-        let input = json!({ "image": image, "mask": mask });
+        let mut input = json!({ "image": image, "mask": mask });
+        if let Some(instruction) = &self.instruction {
+            input["instruction"] = json!(instruction);
+        }
         let (url, body) = match &self.version {
             Some(version) => (
                 format!("{}/v1/predictions", self.base),

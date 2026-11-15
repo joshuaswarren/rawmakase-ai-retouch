@@ -2,7 +2,7 @@
 name = "rawmakase-ai-retouch"
 version = "0.1.0"
 edition = "2024"
-description = "Experimental AI object removal for RAWmakase's Remove tool, through a hosted model and your own API key"
+description = "Experimental AI Remove and AI Replace for RAWmakase's Remove tool, through a hosted model and your own API key"
 license = "MIT"
 repository = "https://github.com/pch/rawmakase-ai-retouch"
 publish = false

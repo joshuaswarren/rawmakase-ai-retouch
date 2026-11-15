@@ -1,26 +1,41 @@
-# AI Remove for RAWmakase
+# AI Retouch for RAWmakase
 
 **Experimental.** A [RAWmakase](https://github.com/pch/rawmakase) extension
-that adds **AI Remove** to the Remove tool: paint over an object and a hosted
-AI model fills the area with what could plausibly be behind it. You use your
-own account and API key with the service.
+that adds two modes to the Remove tool, each run by a hosted AI model with
+your own account and API key:
+
+- **AI Remove**: paint over an object and the model fills the area with what
+  could plausibly be behind it. You can also say what to do, for example
+  *remove the dogs, keep the people*, when you paint over both.
+- **AI Replace**: describe what to put there, for example *a wooden bench*,
+  then paint over the area.
 
 RAWmakase does all the colour work. It renders the region around what you
-painted, sends it to this extension as 8-bit sRGB with the painted area, and
-keeps the pixels it gets back as a patch in your edit, which renders without
-the extension or the service from then on. The extension only turns pixels
-into pixels through the service.
+painted, sends it to this extension as 8-bit sRGB with the painted area and
+what you wrote, and keeps the pixels it gets back as a patch in your edit,
+which renders without the extension or the service from then on. The
+extension only turns pixels into pixels through the service.
 
 ## Services and models
 
-| Service | Model | Price per removal |
-| --- | --- | --- |
-| [fal.ai](https://fal.ai) (default) | Bria FIBO Eraser, [`bria/fibo-edit-1.5/eraser`](https://fal.ai/models/bria/fibo-edit-1.5/eraser), in its pixel-perfect mode (`composite`): only the masked area is rebuilt | $0.04 |
-| [Replicate](https://replicate.com) | Bria Eraser, [`bria/eraser`](https://replicate.com/bria/eraser), an official Replicate model. Another model that takes `image` and `mask` inputs can be named in the settings | $0.04 for `bria/eraser` |
+The model follows what you ask for:
 
-Both models are Bria's, trained on licensed data, and take an image and a
-mask with no prompt. Prices are the services' as of November 2026; check
-their pages for the current ones.
+| You ask for | fal.ai (default) | Replicate |
+| --- | --- | --- |
+| AI Remove, nothing written | Bria FIBO Eraser, [`bria/fibo-edit-1.5/eraser`](https://fal.ai/models/bria/fibo-edit-1.5/eraser), pixel-perfect mode: only the masked area is rebuilt. $0.04 | Bria Eraser, [`bria/eraser`](https://replicate.com/bria/eraser), or another model that takes `image` and `mask` named in the settings. $0.04 |
+| AI Remove, with what to do | Bria FIBO Edit, [`bria/fibo-edit-1.5/edit`](https://fal.ai/models/bria/fibo-edit-1.5/edit), with your text as its instruction. $0.04 | Bria FIBO Edit, [`bria/fibo-edit`](https://replicate.com/bria/fibo-edit) |
+| AI Replace | The **Replace model** setting: Bria GenFill, [`bria/genfill/v2`](https://fal.ai/models/bria/genfill/v2) ($0.04 a megapixel, the default); FLUX.1 Fill \[pro], [`fal-ai/flux-pro/v1/fill`](https://fal.ai/models/fal-ai/flux-pro/v1/fill) ($0.05 a megapixel, rounded up); or Bria FIBO Edit ($0.04) | Bria FIBO Edit, [`bria/fibo-edit`](https://replicate.com/bria/fibo-edit) |
+
+A region is at most 2048 pixels a side, about 4 megapixels, so a
+per-megapixel model costs at most about $0.17 (GenFill) or $0.25 (FLUX) a
+request. The Bria models are trained on licensed data. Prices are the
+services' as of November 2026; check their pages for the current ones.
+
+**Text and the edit models.** The eraser rebuilds only the painted area. FIBO
+Edit and the fill models generate the painted area from your text; RAWmakase
+keeps only what they return inside it. Inside the area, an instruction such
+as *keep the people* is followed as well as the model follows it: check the
+result, and undo it if it changed what it should have kept.
 
 ## Installing
 
@@ -46,14 +61,14 @@ shell profile (`.zshrc`, `.bashrc`), so the setting is the reliable place.
 
 ## Privacy and cost
 
-- **The region leaves your computer.** Each removal uploads the rendered
-  region around what you painted (at most 2048 pixels a side) and a mask to the
-  service you chose. RAWmakase asks once before the first upload. The
-  extension asks fal.ai not to store the request's payloads
-  (`X-Fal-Store-IO: 0`) and deletes the files it uploads to Replicate once the
-  prediction ends; what each service keeps beyond that is up to its own
-  policy.
-- **Each removal is one paid call.** Nothing is retried automatically, not
+- **The region leaves your computer.** Each request uploads the rendered
+  region around what you painted (at most 2048 pixels a side), a mask and
+  what you wrote to the service you chose. RAWmakase asks once before the
+  first upload. The extension asks fal.ai not to store the request's
+  payloads (`X-Fal-Store-IO: 0`) and deletes the files it uploads to
+  Replicate once the prediction ends; what each service keeps beyond that is
+  up to its own policy.
+- **Each request is one paid call.** Nothing is retried automatically, not
   even after a timeout or a rate limit: you decide whether to try again.
 - Your key is kept in the system's credential store by RAWmakase, never in
   its settings file. The extension never logs it, and removes anything shaped
@@ -65,8 +80,9 @@ shell profile (`.zshrc`, `.bashrc`), so the setting is the reliable place.
   deep shadows or smooth gradients may band where a raw edit wouldn't.
 - **At most 2048 pixels a side.** A larger region is sent at a lower
   resolution and scaled back by RAWmakase.
-- **No HDR.** RAWmakase refuses AI Remove on HDR files and HDR edits.
-- **Lightroom never sees these spots.** AI Remove patches are RAWmakase's
+- **No HDR.** RAWmakase refuses AI Remove and AI Replace on HDR files and HDR
+  edits.
+- **Lightroom never sees these spots.** Their patches are RAWmakase's
   own: they aren't written to XMP, so Lightroom and Camera Raw show the photo
   without them.
 - The result depends on the service: it can change between calls and between
@@ -95,17 +111,19 @@ RAWmakase's Install from GitHub finds them.
 - The painted area is made binary (anything painted at all counts) and grown
   by 6 pixels, so the model also replaces the soft fringe a brush tends to
   miss. The mask is sent as a lossless PNG the region's size, white where to
-  remove.
-- fal.ai: one request to `https://fal.run/bria/fibo-edit-1.5/eraser` with the
-  region and the mask as base64 `data:` URIs, which the
-  [model's API](https://fal.ai/models/bria/fibo-edit-1.5/eraser/api) accepts,
-  and `sync_mode`, which returns the image in the answer.
+  change.
+- fal.ai: one request to `https://fal.run/<model>` with the region and the
+  mask as base64 `data:` URIs, which fal's model APIs accept, what you wrote
+  as the model's `instruction` or `prompt`, and `sync_mode`, which returns
+  the image in the answer. FLUX.1 Fill is asked for a PNG, not its default
+  JPEG.
 - Replicate: the region and the mask are uploaded with the files API, a
   prediction is started with `Prefer: wait` and polled until it ends, then
-  the uploads are deleted.
+  the uploads are deleted. What you wrote goes as `bria/fibo-edit`'s
+  `instruction`.
 - A result at another size than the region is resized to it. Cancelling in
   RAWmakase answers at once; a Replicate prediction is also cancelled on
-  Replicate. A removal gives up after 3 minutes.
+  Replicate. A request gives up after 3 minutes.
 
 The source has the details and the documentation each fact was checked
 against: `src/fal.rs` and `src/replicate.rs`.

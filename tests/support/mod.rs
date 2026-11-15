@@ -199,11 +199,17 @@ pub fn start(config: Config, settings: &[(&str, &str)]) -> MockHost {
         .hello_with(Hello {
             settings,
             extension: "dev.pch.ai-remove".into(),
-            contributions: vec!["retouch-generator/remove".into()],
+            contributions: vec![
+                "retouch-generator/remove".into(),
+                "retouch-generator/replace".into(),
+            ],
             ..MockHost::hello_params()
         })
         .unwrap();
-    assert_eq!(hello.implements, ["retouch-generator/remove"]);
+    assert_eq!(
+        hello.implements,
+        ["retouch-generator/remove", "retouch-generator/replace"]
+    );
     host
 }
 
@@ -256,6 +262,16 @@ pub fn request() -> RetouchGenerate {
         coverage,
         result,
         image_key: "0123456789abcdef".into(),
+        prompt: None,
+    }
+}
+
+/// [`request`] to `generator`, with what the user wrote.
+pub fn asking(generator: &str, prompt: Option<&str>) -> RetouchGenerate {
+    RetouchGenerate {
+        generator: generator.into(),
+        prompt: prompt.map(str::to_string),
+        ..request()
     }
 }
 

@@ -2,9 +2,11 @@
 
 AI Retouch runs on a hosted AI service with your own account, so you need an
 account and an API key with one of them: **fal.ai** (the default) or
-**Replicate**. You only need one. Each removal is one paid call to the
-service, about $0.04 with the default models (November 2026; check the
-service's own price page).
+**Replicate**. You only need one. Each request is one paid call to the
+service: about $0.04 for AI Remove, and up to about $0.17 for AI Replace with
+the default model on a large area (November 2026; see the README's
+[Services and models](../README.md#services-and-models), and the service's own
+price page).
 
 - [fal.ai](#falai)
 - [Replicate](#replicate)
@@ -56,9 +58,10 @@ want another model that takes an image and a mask.
    on macOS, Credential Manager on Windows, the Secret Service on Linux),
    never in its settings file, and never shows it again. To change it, paste
    a new one and Save; **Remove** deletes it.
-4. Choose the **Remove** tool, set **Mode** to **AI Remove** and paint over
-   what to remove. The first time, RAWmakase asks whether it may send the area
-   to the service: choose **Send**.
+4. Choose the **Remove** tool, set **Mode** to **AI Remove** or **AI
+   Replace**, write what to do in the field under Mode (AI Replace needs it)
+   and paint over the area. The first time, RAWmakase asks whether it may
+   send the area to the service: choose **Send**.
 
 ## If something goes wrong
 

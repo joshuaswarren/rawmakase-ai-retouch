@@ -1,16 +1,33 @@
-//! fal.ai: Bria's FIBO Eraser, `bria/fibo-edit-1.5/eraser`, on the
-//! synchronous endpoint `https://fal.run/<model>`.
+//! fal.ai, on the synchronous endpoint `https://fal.run/<model>`, with one
+//! of the models [`FalModel`] names: Bria's FIBO Eraser for a plain removal,
+//! Bria's FIBO Edit for a removal with an instruction, and Bria GenFill, FLUX.1
+//! Fill \[pro] or FIBO Edit for a replacement.
 //!
 //! What this relies on, from fal's documentation (checked 2026-11):
 //!
-//! - The model's input is `image_url` and `mask_url`, "a binary mask the same
-//!   size as the image. White marks what to remove, black what to keep", sent
-//!   lossless. `composite: true` is its "pixel-perfect mode": only the masked
-//!   area is rebuilt and the rest stays as it was, at full resolution. The
-//!   output is `{"image": {"url", "width", "height", ...}, "seed"}` at the
-//!   input's size. $0.04 per image.
-//!   <https://fal.ai/models/bria/fibo-edit-1.5/eraser/api>,
-//!   <https://fal.ai/models/bria/fibo-edit-1.5/eraser>
+//! - `bria/fibo-edit-1.5/eraser` takes `image_url` and `mask_url`, "a binary
+//!   mask the same size as the image. White marks what to remove, black what
+//!   to keep", sent lossless. `composite: true` is its "pixel-perfect mode":
+//!   only the masked area is rebuilt and the rest stays as it was, at full
+//!   resolution. The output is `{"image": {"url", "width", "height", ...},
+//!   "seed"}` at the input's size. $0.04 per image.
+//!   <https://fal.ai/models/bria/fibo-edit-1.5/eraser/api>
+//! - `bria/fibo-edit-1.5/edit` takes `image_urls` ("1-4 reference images"),
+//!   `instruction`, and `mask_url`: "white where the model should edit, black
+//!   elsewhere. Single-reference requests only, and it must be the same size
+//!   as that image. A masked edit comes back at the reference's own
+//!   resolution." $0.04 per image.
+//!   <https://fal.ai/models/bria/fibo-edit-1.5/edit/api>
+//! - `bria/genfill/v2` takes `image_url`, `mask_url` and `instruction`, all
+//!   required ("Instruct what elements you would like to fill in your image
+//!   based on the mask"). $0.04 per megapixel.
+//!   <https://fal.ai/models/bria/genfill/v2>
+//! - `fal-ai/flux-pro/v1/fill` takes `image_url`, `mask_url` and `prompt`
+//!   ("The prompt to fill the masked part of the image"), and
+//!   `output_format` (`jpeg` by default; `png` here). $0.05 per megapixel,
+//!   rounded up. <https://fal.ai/models/fal-ai/flux-pro/v1/fill/api>
+//! - Every one of them answers with `image.url`. White in the mask is what to
+//!   change in all four; the app keeps its own pixels outside it anyway.
 //! - File inputs may be base64 `data:` URIs: the model's API page says you can
 //!   "pass a Base64 data URI as a file input. The API will handle the file
 //!   decoding for you" (fal's CDN guide recommends hosted URLs for large
@@ -34,22 +51,85 @@ use crate::provider::{Provider, ProviderError, reads_as_refusal};
 use serde_json::{Value, json};
 use std::time::Duration;
 
-/// The model this program calls.
-pub(crate) const MODEL: &str = "bria/fibo-edit-1.5/eraser";
+/// The eraser, for a removal without an instruction.
+pub(crate) const ERASER: &str = "bria/fibo-edit-1.5/eraser";
+/// FIBO Edit, for a removal with an instruction and a replacement.
+pub(crate) const EDIT: &str = "bria/fibo-edit-1.5/edit";
+/// Bria GenFill, for a replacement.
+pub(crate) const GENFILL: &str = "bria/genfill/v2";
+/// FLUX.1 Fill \[pro], for a replacement.
+pub(crate) const FLUX_FILL: &str = "fal-ai/flux-pro/v1/fill";
 
-/// fal.ai, with a key.
+/// What a request asks of fal, with its text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum FalModel {
+    /// Remove what is masked: [`ERASER`].
+    Eraser,
+    /// Edit what is masked as told: [`EDIT`].
+    Edit(String),
+    /// Fill what is masked with what is described: [`GENFILL`].
+    GenFill(String),
+    /// Fill what is masked with what is described: [`FLUX_FILL`].
+    FluxFill(String),
+}
+
+impl FalModel {
+    fn id(&self) -> &'static str {
+        match self {
+            Self::Eraser => ERASER,
+            Self::Edit(_) => EDIT,
+            Self::GenFill(_) => GENFILL,
+            Self::FluxFill(_) => FLUX_FILL,
+        }
+    }
+
+    /// The request's body, with the image and mask as data URIs.
+    fn body(&self, image: String, mask: String) -> Value {
+        match self {
+            Self::Eraser => json!({
+                "image_url": image,
+                "mask_url": mask,
+                "composite": true,
+                "sync_mode": true,
+            }),
+            Self::Edit(instruction) => json!({
+                "image_urls": [image],
+                "mask_url": mask,
+                "instruction": instruction,
+                "sync_mode": true,
+            }),
+            Self::GenFill(instruction) => json!({
+                "image_url": image,
+                "mask_url": mask,
+                "instruction": instruction,
+                "sync_mode": true,
+            }),
+            Self::FluxFill(prompt) => json!({
+                "image_url": image,
+                "mask_url": mask,
+                "prompt": prompt,
+                "output_format": "png",
+                "sync_mode": true,
+            }),
+        }
+    }
+}
+
+/// fal.ai, with a key and the model a request asks for.
 pub(crate) struct Fal {
     base: String,
     key: String,
+    model: FalModel,
     timeout: Duration,
 }
 
 impl Fal {
     /// `base` is the synchronous endpoint (`https://fal.run`).
-    pub(crate) fn new(base: &str, key: &str, timeout: Duration) -> Self {
+    pub(crate) fn new(base: &str, key: &str, model: FalModel, timeout: Duration) -> Self {
         Self {
             base: base.trim_end_matches('/').to_string(),
             key: key.to_string(),
+            model,
             timeout,
         }
     }
@@ -61,13 +141,19 @@ impl Provider for Fal {
     }
 
     fn model(&self) -> String {
-        MODEL.into()
+        self.model.id().into()
     }
 
-    /// The last part is this program's mask policy (a threshold and a
-    /// grow); raise it when what is sent for the same pixels changes.
+    /// The model and its options; the last part is this program's mask
+    /// policy (a threshold and a grow). Raise it when what is sent for the
+    /// same pixels changes. What the user wrote isn't in it: the app sends
+    /// and keeps that itself.
     fn model_key(&self) -> String {
-        format!("fal|{MODEL}|composite|1")
+        match self.model {
+            FalModel::Eraser => format!("fal|{ERASER}|composite|1"),
+            FalModel::FluxFill(_) => format!("fal|{FLUX_FILL}|png|1"),
+            _ => format!("fal|{}|1", self.model.id()),
+        }
     }
 
     fn erase(
@@ -79,16 +165,14 @@ impl Provider for Fal {
         if cancel() {
             return Err(ProviderError::Cancelled);
         }
-        let body = json!({
-            "image_url": http::data_uri("image/png", image_png),
-            "mask_url": http::data_uri("image/png", mask_png),
-            "composite": true,
-            "sync_mode": true,
-        });
+        let body = self.model.body(
+            http::data_uri("image/png", image_png),
+            http::data_uri("image/png", mask_png),
+        );
         let agent = http::agent(self.timeout);
         let reply = http::read(
             agent
-                .post(format!("{}/{MODEL}", self.base))
+                .post(format!("{}/{}", self.base, self.model.id()))
                 .header("Authorization", format!("Key {}", self.key))
                 .header("X-Fal-Store-IO", "0")
                 .content_type("application/json")

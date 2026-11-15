@@ -1,15 +1,20 @@
-//! AI Remove: object removal for RAWmakase's Remove tool through a hosted
-//! model, with the user's own API key.
+//! AI Retouch: AI Remove and AI Replace for RAWmakase's Remove tool through
+//! a hosted model, with the user's own API key.
 //!
 //! The app sends `retouch.generate` with a region of the photo (8-bit sRGB),
-//! how much of each pixel the user painted, and a result buffer of the same
-//! size. This program turns the painted area into a binary mask, sends the
-//! region and the mask to the chosen provider ([`fal`] by default, or
-//! [`replicate`]), and writes the provider's image back into the result. The
-//! app owns all colour work, the patch and how it blends; this program only
-//! turns pixels into pixels.
+//! how much of each pixel the user painted, a result buffer of the same size
+//! and, when the user wrote one, the request's text. This program turns the
+//! painted area into a binary mask, sends the region, the mask and the text
+//! to the chosen provider ([`fal`] by default, or [`replicate`]), and writes
+//! the provider's image back into the result. The app owns all colour work,
+//! the patch and how it blends; this program only turns pixels into pixels.
 //!
-//! Every removal is one paid call to the provider, so nothing here retries.
+//! Which model runs follows what is asked ([`Retouch::provider`]): a removal
+//! without text goes to an eraser, one with text ("remove the dogs, keep the
+//! people") to an instruction-following editor, and a replacement to the
+//! fill model the settings choose.
+//!
+//! Every request is one paid call to the provider, so nothing here retries.
 mod fal;
 mod http;
 mod pixels;
@@ -30,8 +35,10 @@ use std::time::{Duration, Instant};
 
 pub use sanitize::sanitize;
 
-/// The manifest's `[[retouch-generator]]` id.
+/// The manifest's `[[retouch-generator]]` id of AI Remove.
 pub const GENERATOR: &str = "remove";
+/// The manifest's `[[retouch-generator]]` id of AI Replace.
+pub const REPLACE: &str = "replace";
 
 /// The manifest's `[[setting]]` ids.
 pub mod setting {
@@ -43,6 +50,9 @@ pub mod setting {
     pub const REPLICATE_TOKEN: &str = "replicate-token";
     /// The Replicate model, `owner/name` or `owner/name:version`.
     pub const REPLICATE_MODEL: &str = "replicate-model";
+    /// The fal.ai model AI Replace uses: [`super::GENFILL`],
+    /// [`super::FLUX_FILL`] or [`super::FIBO_EDIT`].
+    pub const REPLACE_MODEL: &str = "replace-model";
 }
 
 /// The `provider` setting's value for fal.ai, the default.
@@ -51,8 +61,19 @@ pub const FAL: &str = "fal.ai";
 pub const REPLICATE: &str = "Replicate";
 /// The `replicate-model` setting's default.
 pub const DEFAULT_REPLICATE_MODEL: &str = replicate::DEFAULT_MODEL;
-/// The fal.ai model this program calls.
-pub const FAL_MODEL: &str = fal::MODEL;
+/// The fal.ai model a removal without text calls.
+pub const FAL_MODEL: &str = fal::ERASER;
+/// The fal.ai model a removal with text calls.
+pub const FAL_EDIT_MODEL: &str = fal::EDIT;
+/// The Replicate model a request with text calls.
+pub const REPLICATE_EDIT_MODEL: &str = replicate::EDIT_MODEL;
+
+/// The `replace-model` setting's value for Bria GenFill, the default.
+pub const GENFILL: &str = "Bria GenFill";
+/// The `replace-model` setting's value for FLUX.1 Fill \[pro].
+pub const FLUX_FILL: &str = "FLUX.1 Fill [pro]";
+/// The `replace-model` setting's value for Bria FIBO Edit.
+pub const FIBO_EDIT: &str = "Bria FIBO Edit";
 
 /// The environment variable read when the `fal-key` setting is empty.
 pub const FAL_KEY_ENV: &str = "FAL_KEY";
@@ -103,15 +124,49 @@ pub fn extension() -> Extension {
 
 /// The extension, with `config`'s endpoints and environment.
 pub fn extension_with(config: Config) -> Extension {
-    Extension::new().retouch_generator(GENERATOR, Remove { config })
+    Extension::new()
+        .retouch_generator(
+            GENERATOR,
+            Retouch {
+                config: config.clone(),
+                kind: Kind::Remove,
+            },
+        )
+        .retouch_generator(
+            REPLACE,
+            Retouch {
+                config,
+                kind: Kind::Replace,
+            },
+        )
 }
 
-/// The `remove` retouch generator.
-struct Remove {
+/// What a generator does with the painted area.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    /// Removes it, or edits it as the text says.
+    Remove,
+    /// Fills it with what the text describes, which it needs.
+    Replace,
+}
+
+impl Kind {
+    /// What the Remove tool calls it.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Remove => "AI Remove",
+            Self::Replace => "AI Replace",
+        }
+    }
+}
+
+/// The `remove` and `replace` retouch generators.
+struct Retouch {
     config: Config,
+    kind: Kind,
 }
 
-impl RetouchGenerator for Remove {
+impl RetouchGenerator for Retouch {
     fn generate(
         &mut self,
         cx: &Context,
@@ -119,14 +174,16 @@ impl RetouchGenerator for Remove {
     ) -> Result<RetouchGenerated, RemoteError> {
         // Whatever a setting holds, a key pasted in the wrong field included,
         // is cleaned out of what choosing the provider says.
-        let chosen = self.provider(cx.settings()).map_err(|mut e| {
+        // Trimmed, one line and short: the SDK refuses a request otherwise.
+        let text = ask.request.prompt.clone();
+        let chosen = self.provider(cx.settings(), text).map_err(|mut e| {
             let secrets: Vec<&str> = [
                 setting::FAL_KEY,
                 setting::REPLICATE_TOKEN,
                 setting::REPLICATE_MODEL,
             ]
             .iter()
-            .map(|id| text(cx.settings(), id))
+            .map(|id| text_setting(cx.settings(), id))
             .filter(|v| !v.is_empty())
             .collect();
             e.message = sanitize(&e.message, &secrets);
@@ -164,7 +221,11 @@ impl RetouchGenerator for Remove {
                 format!("the model's name doesn't fit: {}", e.message),
             ));
         }
-        cx.progress(None, Some(&format!("Removing with {name}")));
+        let doing = match self.kind {
+            Kind::Remove => "Removing",
+            Kind::Replace => "Replacing",
+        };
+        cx.progress(None, Some(&format!("{doing} with {name}")));
         let encoded = call(
             cx,
             chosen.provider,
@@ -192,12 +253,26 @@ struct Chosen {
     secret: String,
 }
 
-impl Remove {
-    /// The provider the settings choose, with its key: from the setting, or
-    /// else the environment. No key at all is `needs_setup`.
-    fn provider(&self, settings: &Map<String, Value>) -> Result<Chosen, RemoteError> {
+impl Retouch {
+    /// The provider the settings choose, with its key (from the setting, or
+    /// else the environment; no key at all is `needs_setup`), and the model
+    /// for what is asked: a removal without text the eraser, one with text
+    /// the instruction-following editor, a replacement the fill model the
+    /// settings choose on fal.ai and the editor on Replicate.
+    fn provider(
+        &self,
+        settings: &Map<String, Value>,
+        text: Option<String>,
+    ) -> Result<Chosen, RemoteError> {
         let config = &self.config;
-        if text(settings, setting::PROVIDER) == REPLICATE {
+        let what = self.kind.name();
+        if self.kind == Kind::Replace && text.is_none() {
+            return Err(RemoteError::new(
+                ErrorCode::InvalidRequest,
+                "AI Replace needs a description of what to put there",
+            ));
+        }
+        if text_setting(settings, setting::PROVIDER) == REPLICATE {
             let token = key(
                 settings,
                 setting::REPLICATE_TOKEN,
@@ -206,18 +281,20 @@ impl Remove {
             )
             .ok_or_else(|| {
                 needs_setup(format!(
-                    "AI Remove needs a Replicate API token. Set it in {WHERE} \
+                    "{what} needs a Replicate API token. Set it in {WHERE} \
                          (get one at https://replicate.com/account/api-tokens)."
                 ))
             })?;
-            let model = match text(settings, setting::REPLICATE_MODEL) {
-                "" => DEFAULT_REPLICATE_MODEL,
-                model => model,
+            let model = match (&text, text_setting(settings, setting::REPLICATE_MODEL)) {
+                (Some(_), _) => REPLICATE_EDIT_MODEL,
+                (None, "") => DEFAULT_REPLICATE_MODEL,
+                (None, model) => model,
             };
             let provider = replicate::Replicate::new(
                 &config.replicate_url,
                 &token,
                 model,
+                text,
                 config.deadline,
                 config.poll_every,
             )
@@ -229,19 +306,31 @@ impl Remove {
         }
         let key = key(settings, setting::FAL_KEY, FAL_KEY_ENV, config).ok_or_else(|| {
             needs_setup(format!(
-                "AI Remove needs a fal.ai API key. Set it in {WHERE} \
+                "{what} needs a fal.ai API key. Set it in {WHERE} \
                  (get one at https://fal.ai/dashboard/keys)."
             ))
         })?;
+        let model = match (self.kind, text) {
+            (Kind::Remove, None) => fal::FalModel::Eraser,
+            (Kind::Remove, Some(text)) => fal::FalModel::Edit(text),
+            (Kind::Replace, text) => {
+                let text = text.unwrap_or_default();
+                match text_setting(settings, setting::REPLACE_MODEL) {
+                    FLUX_FILL => fal::FalModel::FluxFill(text),
+                    FIBO_EDIT => fal::FalModel::Edit(text),
+                    _ => fal::FalModel::GenFill(text),
+                }
+            }
+        };
         Ok(Chosen {
-            provider: Box::new(fal::Fal::new(&config.fal_url, &key, config.deadline)),
+            provider: Box::new(fal::Fal::new(&config.fal_url, &key, model, config.deadline)),
             secret: key,
         })
     }
 }
 
 /// A text setting, trimmed; `""` when it is missing or not text.
-fn text<'a>(settings: &'a Map<String, Value>, id: &str) -> &'a str {
+fn text_setting<'a>(settings: &'a Map<String, Value>, id: &str) -> &'a str {
     settings
         .get(id)
         .and_then(Value::as_str)
@@ -253,7 +342,7 @@ fn text<'a>(settings: &'a Map<String, Value>, id: &str) -> &'a str {
 /// `env`. A GUI app started from a desktop launcher usually doesn't inherit
 /// a shell's variables, so the setting is the reliable place.
 fn key(settings: &Map<String, Value>, id: &str, env: &str, config: &Config) -> Option<String> {
-    let set = text(settings, id);
+    let set = text_setting(settings, id);
     if !set.is_empty() {
         return Some(set.to_string());
     }
@@ -285,7 +374,7 @@ fn call(
     let (send, receive) = mpsc::channel();
     let flag = cancelled.clone();
     std::thread::Builder::new()
-        .name("ai-remove-call".into())
+        .name("ai-retouch-call".into())
         .spawn(move || {
             let is_cancelled = || flag.load(Ordering::SeqCst);
             let _ = send.send(provider.erase(&image_png, &mask_png, &is_cancelled));
