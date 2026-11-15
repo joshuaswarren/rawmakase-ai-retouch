@@ -60,11 +60,11 @@ id = "remove"
 name = "AI Remove"
 uploads = true
 prompt = "optional"
-prompt-hint = "Optional: e.g. remove the dogs, keep the people"
+prompt-hint = "e.g. remove the dogs, keep the people"
 
 [[retouch-generator]]
 id = "replace"
 name = "AI Replace"
 uploads = true
 prompt = "required"
-prompt-hint = "What to put there, e.g. a wooden bench"
+prompt-hint = "e.g. a wooden bench"
