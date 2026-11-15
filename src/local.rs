@@ -122,7 +122,7 @@ impl Provider for Lama {
 /// The verified model in `dir`, downloading what is missing for up to
 /// `budget`. A download that doesn't finish keeps what it has, and the next
 /// request continues from there. A saved model is hashed again before it is
-/// used (about a quarter of a second), so a damaged file is never trusted.
+/// used (a fraction of a second), so a damaged file is never trusted.
 fn ensure(
     dir: &Path,
     file: &ModelFile,
