@@ -139,4 +139,5 @@ against: `src/fal.rs` and `src/replicate.rs`.
 
 ## License
 
-MIT
+MIT. `icons/retouch.svg` is [Lucide](https://lucide.dev)'s `wand-sparkles`,
+under the ISC license.

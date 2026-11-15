@@ -95,6 +95,18 @@ impl RetouchPanel {
         };
         vec![
             Control {
+                id: None,
+                label: None,
+                help: None,
+                visible_when: None,
+                disabled: false,
+                kind: ControlKind::Help {
+                    text: "Experimental. Each Send is one paid call to the service set up in \
+                           Preferences > Extensions > AI Retouch."
+                        .into(),
+                },
+            },
+            Control {
                 id: Some(MODE.into()),
                 label: Some("Mode".into()),
                 help: None,

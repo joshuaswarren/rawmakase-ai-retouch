@@ -1094,6 +1094,10 @@ fn a_replacement_needs_a_prompt_and_the_panel_keeps_it() {
     assert!(matches!(&prompt.kind,
         rawmakase_extension::protocol::controls::ControlKind::Text { value, multiline: true, .. }
             if value == "  a wooden\nbench "));
+    // The tool says what it is itself, first: RAWmakase doesn't.
+    assert!(matches!(&controls[0].kind,
+        rawmakase_extension::protocol::controls::ControlKind::Help { text }
+            if text.contains("Experimental") && text.contains("paid")));
     host.finish().unwrap();
     // A missing key names what needs it.
     let host = support::start(support::config(&server, &[]), &[]);

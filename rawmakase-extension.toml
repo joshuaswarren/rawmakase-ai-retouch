@@ -60,6 +60,8 @@ id = "retouch"
 name = "AI Retouch"
 uploads = true
 panel = "retouch"
+# Lucide's wand-sparkles (ISC), drawn white for RAWmakase to tint.
+icon = "icons/retouch.svg"
 
 # Remove or Replace, and the prompt: in the tool's drawer.
 [[panel]]
