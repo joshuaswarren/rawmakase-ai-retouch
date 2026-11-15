@@ -37,11 +37,13 @@ request. The Bria models are trained on licensed data. Prices are the
 services' as of November 2026; check their pages for the current ones.
 
 **Text and the edit models.** The eraser rebuilds only the painted area. FIBO
-Edit and the fill models generate the painted area from your text; Nano Banana
-takes no mask and may redraw the whole region (padded to an aspect ratio it
-takes, then cut back); RAWmakase keeps only what they return inside what you
-painted. Inside the area, an instruction such
-as *keep the people* is followed as well as the model follows it: check the
+Edit and the fill models generate the painted area from your text. Nano Banana
+has no mask input: it gets the region (padded to an aspect ratio it takes, then
+cut back) and, as a second image, the painted area in white, with an
+instruction to change only that area; it may still redraw more of the region.
+Either way, RAWmakase keeps only what comes back inside what you painted.
+Inside the area, an instruction such as *keep the people* is followed as well
+as the model follows it: check the
 result, and undo it if it changed what it should have kept.
 
 ## Installing
