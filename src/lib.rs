@@ -245,7 +245,11 @@ impl RetouchGenerator for Retouch {
             Kind::Replace => "Replacing",
         };
         if self.local && !local::cached(cx.data_dir(), &self.config.lama) {
-            cx.progress(None, Some("Downloading the removal model, once (198 MiB)"));
+            let mib = self.config.lama.bytes >> 20;
+            cx.progress(
+                None,
+                Some(&format!("Downloading the removal model, once ({mib} MiB)")),
+            );
         } else {
             cx.progress(None, Some(&format!("{doing} with {name}")));
         }
@@ -290,6 +294,13 @@ impl Retouch {
     ) -> Result<Chosen, RemoteError> {
         let (config, settings) = (&self.config, cx.settings());
         if self.local {
+            if !local::SUPPORTED {
+                return Err(RemoteError::new(
+                    ErrorCode::Unavailable,
+                    "AI Remove on this computer isn't available on Intel Macs: ONNX Runtime has \
+                     no build for them",
+                ));
+            }
             return Ok(Chosen {
                 provider: Box::new(local::Lama::new(
                     config.lama.clone(),

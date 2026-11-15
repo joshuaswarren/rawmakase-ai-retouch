@@ -28,6 +28,10 @@ use std::time::{Duration, Instant};
 /// The model's input side.
 const NET: usize = 512;
 
+/// Whether this build can run the model: ONNX Runtime has no prebuilt binary
+/// for Intel Macs.
+pub(crate) const SUPPORTED: bool = cfg!(not(all(target_os = "macos", target_arch = "x86_64")));
+
 /// A file this program downloads, and what it must be.
 #[derive(Clone, Debug)]
 pub struct ModelFile {
@@ -51,10 +55,15 @@ impl ModelFile {
         }
     }
 
+    /// The first 12 characters of the hash, for names.
+    fn short(&self) -> &str {
+        self.sha256.get(..12).unwrap_or(&self.sha256)
+    }
+
     /// Where the verified file lives in `dir`; named by its hash, so a new
     /// pin is a new file.
     fn path(&self, dir: &Path) -> PathBuf {
-        dir.join(format!("lama-{}.onnx", &self.sha256[..12]))
+        dir.join(format!("lama-{}.onnx", self.short()))
     }
 }
 
@@ -90,7 +99,7 @@ impl Provider for Lama {
         "lama".into()
     }
     fn model_key(&self) -> String {
-        format!("local|lama|{}|{NET}|1", &self.file.sha256[..12])
+        format!("local|lama|{}|{NET}|1", self.file.short())
     }
     fn erase(
         &self,
@@ -112,7 +121,8 @@ impl Provider for Lama {
 
 /// The verified model in `dir`, downloading what is missing for up to
 /// `budget`. A download that doesn't finish keeps what it has, and the next
-/// request continues from there.
+/// request continues from there. A saved model is hashed again before it is
+/// used (about a quarter of a second), so a damaged file is never trusted.
 fn ensure(
     dir: &Path,
     file: &ModelFile,
@@ -121,71 +131,32 @@ fn ensure(
 ) -> Result<PathBuf, ProviderError> {
     let done = file.path(dir);
     if cached(dir, file) {
-        return Ok(done);
+        if sha256_of(&done).is_ok_and(|hash| hash == file.sha256) {
+            return Ok(done);
+        }
+        // Damaged since it was checked: fetch it again.
+        let _ = std::fs::remove_file(&done);
     }
-    let unavailable = |why: String| ProviderError::Unavailable(why);
     let io = |e: std::io::Error| unavailable(format!("couldn't save the model: {e}"));
     std::fs::create_dir_all(dir).map_err(io)?;
     let part = done.with_extension("part");
-    let mut have = std::fs::metadata(&part).map_or(0, |m| m.len());
-    if have > file.bytes {
-        std::fs::remove_file(&part).map_err(io)?;
-        have = 0;
-    }
-    let started = Instant::now();
-    let agent = crate::http::agent(budget);
-    let mut request = agent.get(&file.url);
-    if have > 0 {
-        request = request.header("Range", format!("bytes={have}-"));
-    }
-    let mut response = request
-        .call()
-        .map_err(|e| unavailable(format!("couldn't download the model: {e}")))?;
-    let status = response.status().as_u16();
-    let resumed = match status {
-        206 => true,
-        200 => false,
-        // The part is past what the server has; start over next time.
-        416 => {
-            let _ = std::fs::remove_file(&part);
-            return Err(unavailable(
-                "the model download restarts; send it again".into(),
-            ));
-        }
-        status => {
-            return Err(unavailable(format!(
-                "downloading the model failed (HTTP {status})"
-            )));
-        }
-    };
     let mut out = std::fs::OpenOptions::new()
         .create(true)
-        .write(true)
-        .append(resumed)
-        .truncate(!resumed)
+        .append(true)
         .open(&part)
         .map_err(io)?;
-    let mut have = if resumed { have } else { 0 };
-    let mut body = response.body_mut().as_reader();
-    let mut chunk = vec![0u8; 1 << 16];
-    while have < file.bytes {
-        if cancel() {
-            return Err(ProviderError::Cancelled);
-        }
-        if started.elapsed() > budget {
-            break;
-        }
-        let n = match body.read(&mut chunk) {
-            Ok(0) => break,
-            Ok(n) => n,
-            // A dropped connection or a timeout: keep what came.
-            Err(_) => break,
-        };
-        out.write_all(&chunk[..n]).map_err(io)?;
-        have += n as u64;
+    // One writer at a time: a request cancelled mid-download can leave its
+    // thread writing for a moment, and a retry must not interleave with it.
+    out.try_lock()
+        .map_err(|_| unavailable("the model is already downloading; send it again".into()))?;
+    let mut have = out.metadata().map_err(io)?.len();
+    if have > file.bytes {
+        out.set_len(0).map_err(io)?;
+        have = 0;
     }
-    out.flush().map_err(io)?;
-    drop(out);
+    if have < file.bytes {
+        have = download(file, &mut out, have, budget, cancel)?;
+    }
     if have < file.bytes {
         let mib = |b: u64| b / (1 << 20);
         return Err(unavailable(format!(
@@ -194,6 +165,7 @@ fn ensure(
             mib(file.bytes)
         )));
     }
+    out.sync_all().map_err(io)?;
     if sha256_of(&part).map_err(io)? != file.sha256 {
         let _ = std::fs::remove_file(&part);
         return Err(unavailable(
@@ -204,6 +176,68 @@ fn ensure(
     }
     std::fs::rename(&part, &done).map_err(io)?;
     Ok(done)
+}
+
+fn unavailable(why: String) -> ProviderError {
+    ProviderError::Unavailable(why)
+}
+
+/// Appends the rest of `file` to `out`, which holds `have` bytes of it, until
+/// the answer ends, `budget` runs out or `cancel` is true; returns how many
+/// bytes `out` holds then. A server that ignores the range sends the whole
+/// file again, and `out` starts over.
+fn download(
+    file: &ModelFile,
+    out: &mut std::fs::File,
+    mut have: u64,
+    budget: Duration,
+    cancel: &dyn Fn() -> bool,
+) -> Result<u64, ProviderError> {
+    let io = |e: std::io::Error| unavailable(format!("couldn't save the model: {e}"));
+    let started = Instant::now();
+    let agent = crate::http::agent(budget);
+    let mut request = agent.get(&file.url);
+    if have > 0 {
+        request = request.header("Range", format!("bytes={have}-"));
+    }
+    let mut response = request
+        .call()
+        .map_err(|e| unavailable(format!("couldn't download the model: {e}")))?;
+    match response.status().as_u16() {
+        206 => {}
+        200 => {
+            out.set_len(0).map_err(io)?;
+            have = 0;
+        }
+        // The part is past what the server has; start over next time.
+        416 => {
+            out.set_len(0).map_err(io)?;
+            return Err(unavailable(
+                "the model download restarts; send it again".into(),
+            ));
+        }
+        status => {
+            return Err(unavailable(format!(
+                "downloading the model failed (HTTP {status})"
+            )));
+        }
+    }
+    let mut body = response.body_mut().as_reader();
+    let mut chunk = vec![0u8; 1 << 16];
+    while have < file.bytes && started.elapsed() <= budget {
+        // A dropped connection or a timeout ends the read: keep what came.
+        let n = match body.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        if cancel() {
+            return Err(ProviderError::Cancelled);
+        }
+        out.write_all(&chunk[..n]).map_err(io)?;
+        have += n as u64;
+    }
+    out.flush().map_err(io)?;
+    Ok(have)
 }
 
 fn sha256_of(path: &Path) -> std::io::Result<String> {
@@ -229,7 +263,9 @@ fn fill(
     width: usize,
     height: usize,
 ) -> Result<Vec<u8>, ProviderError> {
-    let invalid = |e: &dyn std::fmt::Display| ProviderError::Invalid(format!("the model: {e}"));
+    // Nothing the user sent was wrong: a model that won't load or run is the
+    // machine's or the file's, so it is unavailable, not invalid.
+    let failed = |e: &dyn std::fmt::Display| unavailable(format!("the model failed: {e}"));
     let square = pixels::pad_to_aspect(rgb, width, height, &["1:1"]);
     let side = square.width;
     let net = shrink(&square.rgb, side);
@@ -238,9 +274,9 @@ fn fill(
         .flat_map(|c| net.iter().skip(c).step_by(3).map(|&v| f32::from(v) / 255.0))
         .collect();
     let mask_in: Vec<f32> = hole.iter().map(|&m| f32::from(m)).collect();
-    let out = infer(model, image, mask_in).map_err(|e| invalid(&e))?;
+    let out = infer(model, image, mask_in).map_err(|e| failed(&e))?;
     if out.len() != 3 * NET * NET {
-        return Err(invalid(&"answered with an unexpected shape"));
+        return Err(failed(&"answered with an unexpected shape"));
     }
     let plane = NET * NET;
     let small: Vec<u8> = (0..plane)
@@ -330,12 +366,7 @@ fn shrink_mask(
             }
             // The cells the pixel's span [p, p+1) of `side` touches.
             let (px, py) = (x + x0, y + y0);
-            let span = |p: usize| {
-                (
-                    p * NET / side,
-                    ((p + 1) * NET).div_ceil(side).max(p * NET / side + 1),
-                )
-            };
+            let span = |p: usize| (p * NET / side, ((p + 1) * NET).div_ceil(side));
             let ((ax, bx), (ay, by)) = (span(px), span(py));
             for cy in ay..by.min(NET) {
                 hole[cy * NET + ax..cy * NET + bx.min(NET)].fill(1);
