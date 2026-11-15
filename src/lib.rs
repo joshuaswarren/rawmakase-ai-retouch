@@ -150,16 +150,6 @@ enum Kind {
     Replace,
 }
 
-impl Kind {
-    /// Its mode's name in the AI Retouch tool.
-    fn name(self) -> &'static str {
-        match self {
-            Self::Remove => "AI Remove",
-            Self::Replace => "AI Replace",
-        }
-    }
-}
-
 /// The `remove` and `replace` retouch generators.
 struct Retouch {
     config: Config,
@@ -265,7 +255,6 @@ impl Retouch {
         text: Option<String>,
     ) -> Result<Chosen, RemoteError> {
         let config = &self.config;
-        let what = self.kind.name();
         if self.kind == Kind::Replace && text.is_none() {
             return Err(RemoteError::new(
                 ErrorCode::InvalidRequest,
@@ -281,8 +270,8 @@ impl Retouch {
             )
             .ok_or_else(|| {
                 needs_setup(format!(
-                    "{what} needs a Replicate API token. Set it in {WHERE} \
-                         (get one at https://replicate.com/account/api-tokens)."
+                    "No Replicate API token is set. Set one in {WHERE}; the link under its \
+                     field shows how to get one."
                 ))
             })?;
             let model = match (&text, text_setting(settings, setting::REPLICATE_MODEL)) {
@@ -306,8 +295,8 @@ impl Retouch {
         }
         let key = key(settings, setting::FAL_KEY, FAL_KEY_ENV, config).ok_or_else(|| {
             needs_setup(format!(
-                "{what} needs a fal.ai API key. Set it in {WHERE} \
-                 (get one at https://fal.ai/dashboard/keys)."
+                "No fal.ai API key is set. Set one in {WHERE}; the link under its field \
+                 shows how to get one."
             ))
         })?;
         let model = match (self.kind, text) {

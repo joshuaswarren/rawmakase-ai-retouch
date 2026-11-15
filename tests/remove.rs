@@ -739,8 +739,14 @@ fn the_manifest_declares_what_the_program_implements() {
     assert_eq!(shown_for(setting::PROVIDER), None);
     assert_eq!(shown_for(setting::FAL_KEY).as_deref(), Some(FAL));
     assert_eq!(shown_for(setting::REPLACE_MODEL).as_deref(), Some(FAL));
-    assert_eq!(shown_for(setting::REPLICATE_TOKEN).as_deref(), Some(REPLICATE));
-    assert_eq!(shown_for(setting::REPLICATE_MODEL).as_deref(), Some(REPLICATE));
+    assert_eq!(
+        shown_for(setting::REPLICATE_TOKEN).as_deref(),
+        Some(REPLICATE)
+    );
+    assert_eq!(
+        shown_for(setting::REPLICATE_MODEL).as_deref(),
+        Some(REPLICATE)
+    );
 }
 
 /// Replicate's files and predictions, each upload answered after `upload`,
@@ -1038,11 +1044,12 @@ fn a_replacement_needs_text_and_text_must_fit() {
         )
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::NeedsSetup);
-    assert!(
-        error
-            .message
-            .starts_with("AI Replace needs a fal.ai API key"),
-        "{error}"
+    // Said without an address, which the key scrubber would mangle: the
+    // setting's help has the link.
+    assert_eq!(
+        error.message,
+        "No fal.ai API key is set. Set one in Preferences > Extensions > AI Retouch; \
+         the link under its field shows how to get one."
     );
 }
 
