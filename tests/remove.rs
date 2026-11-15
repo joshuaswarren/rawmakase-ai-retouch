@@ -885,11 +885,17 @@ fn fal_call(
     rawmakase_extension::protocol::method::RetouchGenerated,
     Request,
 ) {
+    // Each model's documented answer: Bria's an `image`, FLUX's `images`.
     let server = Server::start(|r| match r.path.as_str() {
-        "/bria/fibo-edit-1.5/eraser"
-        | "/bria/fibo-edit-1.5/edit"
-        | "/bria/genfill/v2"
-        | "/fal-ai/flux-pro/v1/fill" => fal_answer(&data_png(W, H, [40, 50, 60])),
+        "/bria/fibo-edit-1.5/eraser" | "/bria/fibo-edit-1.5/edit" | "/bria/genfill/v2" => {
+            fal_answer(&data_png(W, H, [40, 50, 60]))
+        }
+        "/fal-ai/flux-pro/v1/fill" => Reply::json(
+            200,
+            json!({"images": [{"url": data_png(W, H, [40, 50, 60]), "width": W, "height": H,
+                               "content_type": "image/png"}],
+                   "prompt": "a bench", "seed": 7, "has_nsfw_concepts": [false]}),
+        ),
         _ => Reply::json(404, json!({})),
     });
     let mut all = vec![("fal-key", KEY)];

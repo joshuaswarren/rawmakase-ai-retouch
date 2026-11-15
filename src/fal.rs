@@ -26,8 +26,10 @@
 //!   ("The prompt to fill the masked part of the image"), and
 //!   `output_format` (`jpeg` by default; `png` here). $0.05 per megapixel,
 //!   rounded up. <https://fal.ai/models/fal-ai/flux-pro/v1/fill/api>
-//! - Every one of them answers with `image.url`. White in the mask is what to
-//!   change in all four; the app keeps its own pixels outside it anyway.
+//! - The Bria models answer with `image.url`; FLUX.1 Fill with `images`, a
+//!   list of `{url, width, height, content_type}` (one by default). White in
+//!   the mask is what to change in all four; the app keeps its own pixels
+//!   outside it anyway.
 //! - File inputs may be base64 `data:` URIs: the model's API page says you can
 //!   "pass a Base64 data URI as a file input. The API will handle the file
 //!   decoding for you" (fal's CDN guide recommends hosted URLs for large
@@ -185,8 +187,10 @@ impl Provider for Fal {
             return Err(ProviderError::Cancelled);
         }
         let answer = reply.json();
+        // Bria's models answer with `image`, FLUX's with `images`.
         let url = answer["image"]["url"]
             .as_str()
+            .or_else(|| answer["images"][0]["url"].as_str())
             .ok_or_else(|| ProviderError::Invalid("fal.ai's answer has no image".into()))?;
         // A URL fal hosts is public; the key stays with fal.run.
         http::fetch_image(&agent, url, None)
