@@ -29,7 +29,11 @@
 //! - `fal-ai/nano-banana/edit` (Gemini 2.5 Flash Image) takes `prompt` and
 //!   `image_urls`, no mask, an `aspect_ratio` from a list (`auto`, `21:9`,
 //!   `16:9`, `3:2`, `4:3`, `5:4`, `1:1`, `4:5`, `3:4`, `2:3`, `9:16`) and
-//!   `output_format` (`png` here), and answers with `images`. Its page doesn't
+//!   `output_format` (`png` here), and answers with `images`. The painted area
+//!   goes as a second image (white where to change, at the padded size), and
+//!   the prompt asks for the change to stay inside it: RAWmakase keeps only
+//!   what is inside it, so what the model draws past it would be cut off. Its
+//!   page doesn't
 //!   say it keeps the input's size, so the region goes padded (its edges
 //!   mirrored) to the nearest ratio, and its own area is cut back out of the
 //!   answer resized to the padded size. $0.0398 per image.
@@ -135,9 +139,16 @@ impl FalModel {
             }),
             // No mask: it edits the region as told; the ratio is filled in by
             // `erase`, which pads the region to it.
+            // It takes no mask: the painted area goes as a second image, white
+            // where to change, and the prompt says to keep the change there,
+            // as RAWmakase keeps only what is inside it.
             Self::NanoBanana(prompt) => json!({
-                "prompt": prompt,
-                "image_urls": [image],
+                "prompt": format!(
+                    "In the first image, change only the white area of the second image: \
+                     {prompt}. Keep anything you add inside that white area, and leave \
+                     everything outside it exactly as it is."
+                ),
+                "image_urls": [image, mask],
                 "num_images": 1,
                 "output_format": "png",
                 "sync_mode": true,
@@ -205,16 +216,28 @@ impl Provider for Fal {
                 let (rgb, w, h) = pixels::decode(image_png)?;
                 let padded = pixels::pad_to_aspect(&rgb, w, h, &NANO_BANANA_RATIOS);
                 let png = pixels::encode_rgb_png(&padded.rgb, padded.width, padded.height)?;
-                Some((padded, png, w, h))
+                // The mask at the padded size, black in the padding.
+                let (mask_rgb, ..) = pixels::decode(mask_png)?;
+                let mut mask = vec![0u8; padded.width * padded.height];
+                for y in 0..h {
+                    for x in 0..w {
+                        mask[(y + padded.y) * padded.width + x + padded.x] =
+                            mask_rgb[(y * w + x) * 3];
+                    }
+                }
+                let mask = pixels::encode_mask_png(&mask, padded.width, padded.height)?;
+                Some((padded, png, mask, w, h))
             }
             _ => None,
         };
-        let sent = padded
+        let (sent, mask_sent) = padded
             .as_ref()
-            .map_or(image_png, |(_, png, ..)| png.as_slice());
+            .map_or((image_png, mask_png), |(_, png, mask, ..)| {
+                (png.as_slice(), mask.as_slice())
+            });
         let mut body = self.model.body(
             http::data_uri("image/png", sent),
-            http::data_uri("image/png", mask_png),
+            http::data_uri("image/png", mask_sent),
         );
         if let Some((padded, ..)) = &padded {
             body["aspect_ratio"] = json!(padded.ratio);
@@ -242,7 +265,7 @@ impl Provider for Fal {
             .ok_or_else(|| ProviderError::Invalid("fal.ai's answer has no image".into()))?;
         // A URL fal hosts is public; the key stays with fal.run.
         let image = http::fetch_image(&agent, url, None)?;
-        let Some((padded, _, w, h)) = padded else {
+        let Some((padded, _, _, w, h)) = padded else {
             return Ok(image);
         };
         let answer = pixels::decode_to_size(&image, padded.width, padded.height)?;

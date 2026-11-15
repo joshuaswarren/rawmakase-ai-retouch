@@ -997,8 +997,38 @@ fn a_replacement_goes_to_the_model_chosen() {
     );
     assert_eq!(call.path, "/fal-ai/nano-banana/edit");
     let body = call.json();
-    assert_eq!(body["prompt"], json!("change the shoes to high heels"));
-    assert_eq!(body["image_urls"].as_array().unwrap().len(), 1);
+    // Told where: the painted area, white, as a second image of the padded
+    // size, and to keep the change inside it.
+    let prompt = body["prompt"].as_str().unwrap();
+    assert!(
+        prompt.contains("change the shoes to high heels"),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("white area of the second image"),
+        "{prompt}"
+    );
+    let urls = body["image_urls"].as_array().unwrap();
+    assert_eq!(urls.len(), 2);
+    let mask = image::load_from_memory(&support::from_data_uri(urls[1].as_str().unwrap()))
+        .unwrap()
+        .into_luma8();
+    assert_eq!(mask.dimensions(), (W, H));
+    // White where painted, black far from it (the mask is grown a little).
+    let all = |pick: &dyn Fn(usize, usize) -> bool| {
+        (0..H as usize)
+            .flat_map(|y| (0..W as usize).map(move |x| (x, y)))
+            .find(|(x, y)| pick(*x, *y))
+            .unwrap()
+    };
+    let (px, py) = all(&|x, y| support::painted(x, y));
+    assert_eq!(mask.get_pixel(px as u32, py as u32).0, [255]);
+    let (fx, fy) = all(&|x, y| {
+        (0..H as usize).all(|j| {
+            (0..W as usize).all(|i| !support::painted(i, j) || x.abs_diff(i) + y.abs_diff(j) > 20)
+        })
+    });
+    assert_eq!(mask.get_pixel(fx as u32, fy as u32).0, [0]);
     assert!(body.get("mask_url").is_none());
     assert_eq!(body["aspect_ratio"], json!("4:3"));
     assert_eq!(body["output_format"], json!("png"));
