@@ -55,6 +55,14 @@ control = "text"
 default = "bria/eraser"
 visible-when = { setting = "provider", equals = "Replicate" }
 
+# AI Remove with a model that runs on this computer: nothing leaves it, so
+# there is no `uploads` and no consent question, and nothing to choose, so no
+# panel. The model is downloaded once, on first use.
+[[retouch-generator]]
+id = "local"
+name = "AI Remove on this computer"
+icon = "icons/local.svg"
+
 [[retouch-generator]]
 id = "retouch"
 name = "AI Retouch"

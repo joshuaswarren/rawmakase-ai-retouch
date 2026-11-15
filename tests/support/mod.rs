@@ -180,6 +180,7 @@ pub fn config(server: &Server, env: &[(&str, &str)]) -> Config {
         env: Arc::new(move |name| env.get(name).cloned()),
         poll_every: Duration::from_millis(10),
         deadline: Duration::from_secs(8),
+        lama: Config::default().lama,
     }
 }
 
@@ -207,14 +208,22 @@ pub fn start(config: Config, settings: &[(&str, &str)]) -> MockHost {
         .hello_with(Hello {
             settings,
             extension: "dev.pch.ai-remove".into(),
-            contributions: vec!["retouch-generator/retouch".into(), "panel/retouch".into()],
+            contributions: vec![
+                "retouch-generator/retouch".into(),
+                "retouch-generator/local".into(),
+                "panel/retouch".into(),
+            ],
             data_dir,
             ..MockHost::hello_params()
         })
         .unwrap();
     assert_eq!(
         hello.implements,
-        ["panel/retouch", "retouch-generator/retouch"]
+        [
+            "panel/retouch",
+            "retouch-generator/local",
+            "retouch-generator/retouch"
+        ]
     );
     host
 }
